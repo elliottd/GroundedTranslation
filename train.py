@@ -35,8 +35,6 @@ class VisualWordLSTM:
     self.unkdict = dict() # counts occurrence of tokens
     self.counter = 0
     self.tokenizer = PTBTokenizer()
-    self.trainText = []
-    self.valText = []
     self.maxSeqLen = 0
 
     if self.args.debug:
@@ -77,7 +75,7 @@ class VisualWordLSTM:
       train/valY:  sequences of the next words expected at each time
                    step in the model.
 
-      self.vocab and self.unk store the dictionary and token frequency
+      self.vocab and self.unkdict store the dictionary and token frequency
       self.word2index and self.index2word store transformation maps
       self.features store the VGG 16 features
     '''
@@ -148,7 +146,7 @@ class VisualWordLSTM:
   
     if self.args.one:
       inputlen = 1 # number of images
-    if self.args.tiny:
+    if self.args.small:
       inputlen = 10 # number of images
     else:
       inputlen = len(split)
@@ -195,6 +193,13 @@ class VisualWordLSTM:
     vis     = [...,    ,    ,       ,     ,    ,         ,       ]
     '''
 
+    if self.args.one:
+      inputlen = 1
+    elif self.args.small:
+      inputlen = 10
+    else:
+      inputlen = len(split)
+
     vggOffset = 0
     if val == True:
       vggOffset = len(self.split['train'])
@@ -202,24 +207,25 @@ class VisualWordLSTM:
     sentences = []
     next_words = []
     vgg = []
-    if self.args.tiny:
-      inputlen = 10
-    else:
-      inputlen = len(split)
+
     imageidx = 0
     for image in split[0:inputlen]:
       for sentence in image['sentences']:
         sent = sentence['tokens']
         sent = [w for w in sent if w in self.vocab]
-        sentSeq = [self.word2index[x] for x in sent]
-        nextSeq = [self.word2index[x] for x in sent[1:]]
-        sentSeq.extend([self.word2index['*-END-*'] for x in range(0, self.maxSeqLen+1 - len(sentSeq))])
-        nextSeq.extend([self.word2index['*-END-*'] for x in range(0, self.maxSeqLen+1 - len(nextSeq))])
+        inputs = [self.word2index[x] for x in sent]
+        targets = [self.word2index[x] for x in sent[1:]]
 
-        sentences.append(sentSeq)
-        next_words.append(nextSeq)
+        # right pad the sequences to the same length because Keras 
+        # needs this for batch processing
+        inputs.extend([self.word2index['*-END-*'] \
+                      for x in range(0, self.maxSeqLen+1 - len(sentSeq))])
+        targets.extend([self.word2index['*-END-*'] \
+                       for x in range(0, self.maxSeqLen+1 - len(nextSeq))])
+
+        sentences.append(inputs)
+        next_words.append(targets)
         vgg.append(vggOffset+imageidx)
-
       imageidx += 1
 
     vectorised_sentences = np.zeros((len(sentences), self.maxSeqLen+1, len(self.vocab)))
@@ -228,16 +234,18 @@ class VisualWordLSTM:
 
     splitname = 'train' if val==False else 'val'
   
-    print(vectorised_sentences.shape, vectorised_next_words.shape, vectorised_vgg.shape)
-
     seqindex = 0
     for image in split[0:inputlen]:
       for sentence in image['sentences']:
-        vectorised_vgg[seqindex,0] = self.features[:,vgg[seqindex]]
+        # we only want visual features at timestep 0
+        vectorised_vgg[seqindex,0] = self.features[:,vgg[seqindex]] 
         for j in range(0, len(sentences[seqindex])-1):
           vectorised_sentences[seqindex, j, sentences[seqindex][j]] = 1.
           vectorised_next_words[seqindex, j, next_words[seqindex][j]] = 1.
-        seqindex += 1
+        seqindex += 1 
+
+    if self.args.debug:
+      print(vectorised_sentences.shape, vectorised_next_words.shape, vectorised_vgg.shape)
 
     return vectorised_sentences, vectorised_vgg, vectorised_next_words
 
@@ -495,7 +503,7 @@ if __name__ == "__main__":
   parser.add_argument("--debug", action="store_true", help="Print debug messages to stdout?")
 
   parser.add_argument("--one", action="store_true", help="Run on one image--{sentences} pairing? Useful for debugging")
-  parser.add_argument("--tiny", action="store_true", help="Run on 100 image--{sentences} pairing. Useful for debugging")
+  parser.add_argument("--small", action="store_true", help="Run on 100 image--{sentences} pairing. Useful for debugging")
 
   parser.add_argument("--epochs", default=50, type=int)
   parser.add_argument("--batch_size", default=100, type=int)
