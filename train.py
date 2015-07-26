@@ -44,15 +44,15 @@ class VisualWordLSTM:
       theano.config.exception_verbosity='high'
 
   def trainModel(self):
-    trainX, trainIX, trainY, valX, valIX, valY = self.prepareInput()
-    model = self.buildKerasModel()
-    multipleCallbacks = CompilationOfCallbacks(self.word2index, self.index2word, valX, valIX, self.args, self.split, self.features)
-
     '''
     In the model, we will merge the VGG image representation with
     the word embeddings. We need to feed the data as a list, in which
     the order of the elements in the list is _crucial_.
     '''
+    trainX, trainIX, trainY, valX, valIX, valY = self.prepareInput()
+    model = self.buildKerasModel()
+    multipleCallbacks = CompilationOfCallbacks(self.word2index, self.index2word, valX, valIX, self.args, self.split, self.features)
+
 
     model.fit([trainX, trainIX], trainY, batch_size=self.args.batch_size, 
               validation_data=([valX, valIX], valY), nb_epoch=self.args.epochs, 
@@ -106,17 +106,14 @@ class VisualWordLSTM:
     self.collect_counts(self.split['train'])
     self.collect_counts(self.split['val'])
 
-    self.vocabHolder = [w for w in self.unkdict if self.unkdict[w] >= self.args.unk]
-    vocabIndex = 0
-    for w in self.vocabHolder:
-      self.vocab[w] = vocabIndex
-      vocabIndex += 1
+    truncatedVocab = [w for w in self.unkdict if self.unkdict[w] >= self.args.unk]
+    for idx, w in enumerate(truncatedVocab):
+      self.vocab[w] = idx
 
     self.index2word  = dict((v,k) for k,v in self.vocab.iteritems())
     self.word2index  = dict((k,v) for k,v in self.vocab.iteritems())
 
-    self.findMaxSeqLen(self.split['train'])
-    self.findMaxSeqLen(self.split['val'])
+    self.maxLen = self.determineMaxLen()
 
     if self.args.debug:
       print(len(self.index2word))
@@ -124,11 +121,8 @@ class VisualWordLSTM:
       print(len(self.word2index))
       print(self.word2index.items())
 
-    #trainX, trainIX, trainY = self.createInputSequences(self.split['train'])
-    #valX, valIX, valY = self.createInputSequences(self.split['val'], val=True)
-
-    trainX, trainIX, trainY = self.createMaxLenInputSequences(self.split['train'])
-    valX, valIX, valY = self.createMaxLenInputSequences(self.split['val'], val=True)
+    trainX, trainIX, trainY = self.createPaddedInputSequences(self.split['train'])
+    valX, valIX, valY = self.createPaddedInputSequences(self.split['val'], val=True)
 
     if self.args.debug:
       print('trainX shape:', trainX.shape)
@@ -168,39 +162,39 @@ class VisualWordLSTM:
           else:
             self.unkdict[token] += 1
 
-  def findMaxSeqLen(self, split):
+  def determineMaxLen(self):
     '''
-    Process each sentence in filename to extend the current vocabulary with
-    the words in the input. Also updates the statistics in the unk dictionary.
-
-    We add a Start-of-Sequence and End-of-Sequence token to the input in the
-    vain hope that it will help the language model better understand where it
-    may be within a long-range of tokens.
+    Find the longest sequence of tokens for a description in the data. This
+    will be used to pad sequences out to the same length.
     '''
   
-    inputlen = len(split)
+    splits = ['train', 'val']
+    longest = 0
 
-    for image in split[0:inputlen]:
-      for sentence in image['sentences']:
-        sent = sentence['tokens']
-        sent = [w for w in sent if w in self.vocab]
-        if len(sent) > self.maxSeqLen:
-          self.maxSeqLen = len(sent)
+    for split in splits:
+      inputlen = len(split)
 
-  def createMaxLenInputSequences(self, split, val=False):
+      for image in split:
+        for sentence in image['sentences']:
+          sent = sentence['tokens']
+          sent = [w for w in sent if w in self.vocab]
+          if len(sent) > longest:
+            longest = len(sent)
+
+    return longest
+
+  def createPaddedInputSequences(self, split, val=False):
     ''' 
-    Cut the text into (semi-)redundant sequences of self.maxlen characters,
-    with a gap of self.step_size tokens between sequences
-
-    Given a maxlen=3 characters, and a step_size=2 character
+    Creates padding input sequences of the text and visual features.
+    The visual features are only present in the first step.
 
     <S> The boy ate cheese with a spoon <E> would be transformed into
  
-    inputs = [<S> the boy, cheese with a, spoon <E> <E>]
-    targets = [ate, spoon, <E>]
+    inputs  = [<S>, the, boy, ate,    cheese, with, a, spoon, <E>]
+    targets = [the, boy, ate, cheese, with,   a,    spoon,    <E>]
+    vis     = [...,    ,    ,       ,     ,    ,         ,       ]
     '''
 
-    # read the text from disk and lowercase all tokens
     vggOffset = 0
     if val == True:
       vggOffset = len(self.split['train'])
@@ -221,34 +215,12 @@ class VisualWordLSTM:
         nextSeq = [self.word2index[x] for x in sent[1:]]
         sentSeq.extend([self.word2index['*-END-*'] for x in range(0, self.maxSeqLen+1 - len(sentSeq))])
         nextSeq.extend([self.word2index['*-END-*'] for x in range(0, self.maxSeqLen+1 - len(nextSeq))])
-        #print(sentSeq)
-
-        '''
-        sentSeq = []
-        nextSeq = []
-        for i in range(self.maxSeqLen+1):
-          try:
-            sentSeq.append(self.word2index[sent[i]])
-          except IndexError:
-            sentSeq.append(self.word2index["*-END-*"])
-
-        for i in range(1, self.maxSeqLen+1):
-          try:
-            nextSeq.append(self.word2index[sent[i]])
-          except IndexError:
-            nextSeq.append(self.word2index["*-END-*"])
-        '''
 
         sentences.append(sentSeq)
         next_words.append(nextSeq)
         vgg.append(vggOffset+imageidx)
 
       imageidx += 1
-
-#    for x,y,z in zip(sentences, next_words, vgg)[0:60]:
-#      print('Input ' + ' '.join([self.index2word[a] for a in x]))
-#      print('Targets ' + ' '.join([self.index2word[b] for b in y]))
-#      print('VGGIndex ' + str(z))
 
     vectorised_sentences = np.zeros((len(sentences), self.maxSeqLen+1, len(self.vocab)))
     vectorised_next_words = np.zeros((len(sentences), self.maxSeqLen+1, len(self.vocab)))
@@ -269,66 +241,6 @@ class VisualWordLSTM:
 
     return vectorised_sentences, vectorised_vgg, vectorised_next_words
 
-  def createInputSequences(self, split, val=False):
-    ''' 
-    Cut the text into (semi-)redundant sequences of self.maxlen characters,
-    with a gap of self.step_size tokens between sequences
-
-    Given a maxlen=3 characters, and a step_size=2 character
-
-    <S> The boy ate cheese with a spoon <E> would be transformed into
- 
-    inputs = [<S> the boy, cheese with a, spoon <E> <E>]
-    targets = [ate, spoon, <E>]
-    '''
-
-    # read the text from disk and lowercase all tokens
-    vggOffset = 0
-    if val == True:
-      vggOffset = len(self.split['train'])
-
-    sentences = []
-    next_words = []
-    vgg = []
-    if self.args.tiny:
-      inputlen = 10
-    else:
-      inputlen = len(split)
-    imageidx = 0
-    for image in split[0:inputlen]:
-      for sentence in image['sentences']:
-        sent = sentence['tokens']
-        sent = [w for w in sent if w in self.vocab]
-        for j in range(0, len(sent) - self.args.maxlen, self.args.step_size):
-          sentences.append([self.word2index[z] for z in sent[j:j+self.args.maxlen]])
-          next_words.append([self.word2index[z] for z in sent[j+1:j+1+self.args.maxlen]])
-          vgg.append(vggOffset+imageidx)
-      imageidx += 1
-
-#    for x,y,z in zip(sentences, next_words, vgg)[0:60]:
-#      print('Input ' + ' '.join([self.index2word[a] for a in x]))
-#      print('Targets ' + ' '.join([self.index2word[b] for b in y]))
-#      print('VGGIndex ' + str(z))
-
-    vectorised_sentences = np.zeros((len(sentences), self.args.maxlen+1, len(self.vocab)))
-    vectorised_next_words = np.zeros((len(sentences), self.args.maxlen+1, len(self.vocab)))
-    vectorised_vgg = np.zeros((len(sentences), self.args.maxlen+1, 4096))
-
-    splitname = 'train' if val==False else 'val'
-  
-    print(vectorised_sentences.shape, vectorised_next_words.shape, vectorised_vgg.shape)
-
-    seqindex = 0
-    for image in split[0:inputlen]:
-      for sentence in image['sentences']:
-        vectorised_vgg[seqindex,0] = self.features[:,vgg[seqindex]]
-        for j in range(0, self.args.maxlen):
-          vectorised_sentences[seqindex, j, sentences[seqindex][j]] = 1.
-          vectorised_next_words[seqindex, j, next_words[seqindex][j]] = 1.
-        seqindex += 1
-
-    return vectorised_sentences, vectorised_vgg, vectorised_next_words
-  
   def buildKerasModel(self):
     '''
     Define the exact structure of your model here. We create an image
@@ -360,7 +272,6 @@ class VisualWordLSTM:
     model.add(TimeDistributedDense(stacked_LSTM_size, len(self.word2index), W_regularizer=l2(self.args.l2reg)))
     model.add(Activation('time_distributed_softmax'))
     
-    #rmsprop = RMSprop(lr=self.args.learning_rate, rho=0.999, epsilon=1e-8)
     model.compile(loss='categorical_crossentropy', optimizer=self.args.optimiser)
 
     return model
@@ -593,14 +504,11 @@ if __name__ == "__main__":
   parser.add_argument("--droph", default=0., type=float, help="Prob. of dropping hidden units. Default=0.")
 
   parser.add_argument("--optimiser", default="adagrad", type=str, help="Optimiser: rmsprop, momentum, adagrad, etc.")
-  parser.add_argument("--learning_rate", default=1e-3, type=float)
-  parser.add_argument("--decay", default=True, type=bool, help="Decay learning rate if no improvement in loss?")
   parser.add_argument("--stoppingLoss", default="bleu", type=str, help="minimise cross-entropy or maximise BLEU?")
   parser.add_argument("--l2reg", default=1e-8, type=float, help="L2 cost penalty. Default=1e-8")
 
   parser.add_argument("--maxlen", type=int, help="maximum n-grams to extract from text. Default=10", default=4)
   parser.add_argument("--unk", type=int, help="unknown character cut-off. Default=5", default=5)
-  parser.add_argument("--step_size", type=int, help="Number of tokens between consecutive instances when constructing training data", default=1)
 
   
   w = VisualWordLSTM(parser.parse_args())
