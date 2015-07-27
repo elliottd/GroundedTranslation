@@ -99,10 +99,10 @@ class VisualWordLSTM:
         to create a model vocabulary. Words that appear fewer than 
         self.args.unk times will be ignored '''
 
-    self.unkdict['*-START-*'] = 0
-    self.unkdict['*-END-*'] = 0
-    self.collect_counts(self.split['train'])
-    self.collect_counts(self.split['val'])
+    self.unkdict['<S>'] = 0
+    self.unkdict['<E>'] = 0
+    self.collectCounts(self.split['train'])
+    self.collectCounts(self.split['val'])
 
     truncatedVocab = [w for w in self.unkdict if self.unkdict[w] >= self.args.unk]
     for idx, w in enumerate(truncatedVocab):
@@ -111,7 +111,7 @@ class VisualWordLSTM:
     self.index2word  = dict((v,k) for k,v in self.vocab.iteritems())
     self.word2index  = dict((k,v) for k,v in self.vocab.iteritems())
 
-    self.maxLen = self.determineMaxLen()
+    self.maxSeqLen = self.determineMaxLen()
 
     if self.args.debug:
       print(len(self.index2word))
@@ -134,7 +134,7 @@ class VisualWordLSTM:
     
     return trainX, trainIX, trainY, valX, valIX, valY
 
-  def collect_counts(self, split):
+  def collectCounts(self, split):
     '''
     Process each sentence in filename to extend the current vocabulary with
     the words in the input. Also updates the statistics in the unk dictionary.
@@ -153,7 +153,7 @@ class VisualWordLSTM:
 
     for image in split[0:inputlen]:
       for sentence in image['sentences']:
-        sentence['tokens'] = ['*-START-*'] + sentence['tokens'] + ['*-END-*']
+        sentence['tokens'] = ['<S>'] + sentence['tokens'] + ['<E>']
         for token in sentence['tokens']:
           if token not in self.unkdict:
             self.unkdict[token] = 1
@@ -172,7 +172,7 @@ class VisualWordLSTM:
     for split in splits:
       inputlen = len(split)
 
-      for image in split:
+      for image in self.split[split]:
         for sentence in image['sentences']:
           sent = sentence['tokens']
           sent = [w for w in sent if w in self.vocab]
@@ -218,10 +218,10 @@ class VisualWordLSTM:
 
         # right pad the sequences to the same length because Keras 
         # needs this for batch processing
-        inputs.extend([self.word2index['*-END-*'] \
-                      for x in range(0, self.maxSeqLen+1 - len(sentSeq))])
-        targets.extend([self.word2index['*-END-*'] \
-                       for x in range(0, self.maxSeqLen+1 - len(nextSeq))])
+        inputs.extend([self.word2index['<E>'] \
+                      for x in range(0, self.maxSeqLen+1 - len(inputs))])
+        targets.extend([self.word2index['<E>'] \
+                       for x in range(0, self.maxSeqLen+1 - len(targets))])
 
         sentences.append(inputs)
         next_words.append(targets)
@@ -310,8 +310,8 @@ class CompilationOfCallbacks(Callback):
     self.index2word = index2word
     self.valWords = valX
     self.valImageFeats = valIX
-    self.argumentsDict = argsDict
-    self.maxlen = self.argumentsDict.maxlen
+    self.args = argsDict
+    self.maxlen = self.args.maxlen
     self.split = splits
     self.features = feats
 
@@ -337,11 +337,18 @@ class CompilationOfCallbacks(Callback):
 
     checkpointed = self.checkpointParameters(epoch, logs, path, bleu, valBleu)
     # copy the exact training file into the directory for replication
-    shutil.copyfile("train.py", "%s/train.py" % path) 
 
+  def on_train_end(self, logs={}):
+    print("Training complete")
+    i = 0
+    for epoch in zip(self.loss, self.bleu, self.val_loss, self.val_bleu):
+      print("Epoch %d - train loss: %.5f bleu %.2f |"\
+            " val loss: %.5f bleu %.2f" % (i, epoch[0], epoch[1], 
+                                           epoch[2], epoch[3]))
+      i+=1
+    print()
 
   def extractReferences(self, directory, val=True):
-
     references = []
 
     if val:
@@ -382,20 +389,23 @@ class CompilationOfCallbacks(Callback):
     return bleu
 
   def createCheckpointDirectory(self, epoch, savetime):
-    prefix = "%s-" % self.argumentsDict.runString if self.argumentsDict.runString != "" else ""
-    filepath = "checkpoints/%sepoch%d-%s" % ((prefix, epoch, savetime))
+    '''
+    We will create one directory to store all of the epochs data inside. The
+    name is based on the runString (if provided) or the current time.
+    '''
+
+    prefix = self.args.runString if self.args.runString != "" else ""
+    filepath = "checkpoints/%s/epoch%d-%s" % ((prefix, epoch, savetime))
     try:
-      os.mkdir("checkpoints/%sepoch%d-%s" % ((prefix, epoch, savetime)))
+      os.mkdir("checkpoints/%s/" % (prefix))
+      shutil.copyfile("train.py", "checkpoints/%s/train.py" % prefix)
+    except OSError:
+      pass # directory already exists
+    try:
+      os.mkdir("checkpoints/%s/epoch%d-%s" % ((prefix, epoch, savetime)))
     except OSError:
       pass # directory already exists
     return filepath
-
-  def on_train_end(self, logs={}):
-    print("Training complete")
-    i = 0
-    for epoch in zip(self.loss, self.bleu, self.val_loss, self.val_bleu):
-      print("Epoch %d - best train loss: %.5f bleu %.2f | best val loss: %.5f bleu %.2f" % (i, epoch[0], epoch[1]))
-    print()
 
   def saveRunArguments(self, filepath):
     '''
@@ -403,16 +413,15 @@ class CompilationOfCallbacks(Callback):
     used to parameterise this run.
     '''
     handle = open("%s/argparse.args" % filepath, "w")
-    for arg, val in self.argumentsDict.__dict__.iteritems():
+    for arg, val in self.args.__dict__.iteritems():
       handle.write("%s: %s\n" % (arg, str(val)))
     handle.close()
-    #shutil.copyfile("dictionary.pk", "%s/dictionary.pk" %  directory) # copy the dictionary
 
   def checkpointParameters(self, epoch, logs, filepath, bleu, valBleu):
     '''
     We checkpoint the model parameters based on either PPLX reduction or
     BLEU score increase in the validation data. This is driven by the
-    user-specified argument.
+    user-specified argument self.args.stoppingLoss.
     '''
 
     filepath = "%s/weights.hdf5" % filepath
@@ -429,14 +438,14 @@ class CompilationOfCallbacks(Callback):
       self.bleu.append(bleu)
       self.val_bleu.append(valBleu)
 
-      if self.argumentsDict.stoppingLoss == 'model':
+      if self.args.stoppingLoss == 'model':
         if cur_val_loss < self.best_val_loss:
           if self.verbose > 0:
             print("Saving model to %s because val loss decreased" % filepath)
           self.best_val_loss = cur_val_loss
           self.model.save_weights(filepath, overwrite=True)
 
-      elif self.argumentsDict.stoppingLoss == 'bleu':
+      elif self.args.stoppingLoss == 'bleu':
         if valBleu > self.best_val_bleu:
           if self.verbose > 0:
             print("Saving model to %s because bleu increased" % filepath)
@@ -462,7 +471,7 @@ class CompilationOfCallbacks(Callback):
     handle = open("%s/%sGenerated" % (filepath, prefix), "w")
 
     # Generating image descriptions involves create a
-    # sentence vector with the *-START-* symbol
+    # sentence vector with the <S> symbol
     if val:
       vggOffset = len(self.split['train'])
       start = 0
@@ -475,7 +484,7 @@ class CompilationOfCallbacks(Callback):
     vggindex = 0
     complete_sentences = []
 
-    complete_sentences = [["*-START-*"] for a in range(1000)]
+    complete_sentences = [["<S>"] for a in range(1000)]
     vfeats = np.zeros((1000, 10+1, 4096))
     for i in range(1000):
       vfeats[i,0] = self.features[:,vggOffset+i]
@@ -492,7 +501,7 @@ class CompilationOfCallbacks(Callback):
     sys.stdout.flush()
 
     for s in complete_sentences:
-      handle.write(' '.join([x for x in itertools.takewhile(lambda n: n != "*-END-*", s[1:])]) + "\n")
+      handle.write(' '.join([x for x in itertools.takewhile(lambda n: n != "<E>", s[1:])]) + "\n")
   
     handle.close()
 
