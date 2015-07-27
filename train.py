@@ -314,7 +314,6 @@ class CompilationOfCallbacks(Callback):
     self.valWords = valX
     self.valImageFeats = valIX
     self.args = argsDict
-    self.maxlen = self.args.maxlen
     self.split = splits
     self.features = feats
 
