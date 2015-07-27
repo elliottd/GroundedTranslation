@@ -256,6 +256,9 @@ class VisualWordLSTM:
     a word embedding model, with an LSTM over the sequences.
 
     The order in which these appear below (text, image) is _IMMUTABLE_.
+
+    TODO: we should split this out into a static class so we can also archive
+          the exact form of the model when checkpointing data.
     '''
 
     print('Building Keras model...')
@@ -263,19 +266,19 @@ class VisualWordLSTM:
     # We will learn word representations for each word
     text = Sequential()
     text.add(TimeDistributedDense(len(self.word2index), self.args.hidden_size, W_regularizer=l2(self.args.l2reg)))
-    text.add(Dropout(0.5)) # Uncomment to get 20% dropout on inputs
+    text.add(Dropout(self.args.dropin))
     
     # Compress the VGG features into hidden_size
     visual = Sequential()
     visual.add(TimeDistributedDense(4096, self.args.hidden_size, W_regularizer=l2(self.args.l2reg)))
-    text.add(Dropout(0.5)) # Uncomment to get 20% dropout on vgg inputs
+    text.add(Dropout(self.args.dropin))
 
     # The model is a merge of the VGG features and the Word Embedding vectors
     model = Sequential()
     model.add(Merge([text, visual], mode='sum'))
     model.add(LSTM(self.args.hidden_size, self.args.hidden_size, return_sequences=True)) # Sequence model 
     stacked_LSTM_size = int(math.floor(self.args.hidden_size * 0.8))
-    model.add(Dropout(0.5))
+    model.add(Dropout(self.args.droph))
     model.add(LSTM(self.args.hidden_size, stacked_LSTM_size, return_sequences=True)) # Sequence model 
     model.add(TimeDistributedDense(stacked_LSTM_size, len(self.word2index), W_regularizer=l2(self.args.l2reg)))
     model.add(Activation('time_distributed_softmax'))
@@ -516,15 +519,14 @@ if __name__ == "__main__":
 
   parser.add_argument("--epochs", default=50, type=int)
   parser.add_argument("--batch_size", default=100, type=int)
-  parser.add_argument("--hidden_size", default=256, type=int)
-  parser.add_argument("--dropin", default=0., type=float, help="Prob. of dropping embedding units. Default=0.")
-  parser.add_argument("--droph", default=0., type=float, help="Prob. of dropping hidden units. Default=0.")
+  parser.add_argument("--hidden_size", default=512, type=int)
+  parser.add_argument("--dropin", default=0.5, type=float, help="Prob. of dropping embedding units. Default=0.5")
+  parser.add_argument("--droph", default=0.2, type=float, help="Prob. of dropping hidden units. Default=0.2")
 
   parser.add_argument("--optimiser", default="adagrad", type=str, help="Optimiser: rmsprop, momentum, adagrad, etc.")
   parser.add_argument("--stoppingLoss", default="bleu", type=str, help="minimise cross-entropy or maximise BLEU?")
   parser.add_argument("--l2reg", default=1e-8, type=float, help="L2 cost penalty. Default=1e-8")
 
-  parser.add_argument("--maxlen", type=int, help="maximum n-grams to extract from text. Default=10", default=4)
   parser.add_argument("--unk", type=int, help="unknown character cut-off. Default=5", default=5)
 
   
