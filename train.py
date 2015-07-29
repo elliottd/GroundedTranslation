@@ -124,6 +124,13 @@ class VisualWordLSTM:
     for idx, w in enumerate(truncatedVocab):
       self.vocab[w] = idx
 
+    print "Pickling dictionary to checkpoint/%s/dictionary.pk" % self.args.runString
+    try:
+      os.mkdir("checkpoints/%s" % self.args.runString)
+    except OSError:
+      pass
+    cPickle.dump(self.vocab, open("checkpoints/%s/dictionary.pk" % self.args.runString, "wb"))
+
     self.index2word  = dict((v,k) for k,v in self.vocab.iteritems())
     self.word2index  = dict((k,v) for k,v in self.vocab.iteritems())
 
