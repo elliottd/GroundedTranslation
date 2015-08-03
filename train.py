@@ -204,11 +204,14 @@ class VisualWordLSTM:
     Creates padding input sequences of the text and visual features.
     The visual features are only present in the first step.
 
-    <S> The boy ate cheese with a spoon <E> would be transformed into
+    <S> The boy ate cheese with a spoon <E> with a maxSeqLen=10 would be 
+    transformed into
  
-    inputs  = [<S>, the, boy, ate,    cheese, with, a, spoon, <E>]
-    targets = [the, boy, ate, cheese, with,   a,    spoon,    <E>]
-    vis     = [...,    ,    ,       ,     ,    ,         ,       ]
+    inputs  = [<S>, the, boy, ate,    cheese, with, a, spoon, <E>, <E>]
+    targets = [the, boy, ate, cheese, with,   a,    spoon,    <E>, <E>]
+    vis     = [...,    ,    ,       ,     ,    ,         ,       ,    ]
+
+    TODO: allow left/right padding, given a parameter
     '''
 
     inputLen = 100 if self.args.small else len(split) # for debugging
