@@ -22,6 +22,7 @@ import math
 import json
 from collections import defaultdict
 import shutil
+import cPickle
 
 from ptbtokenizer import PTBTokenizer
 from Callbacks import CompilationOfCallbacks
@@ -124,7 +125,7 @@ class VisualWordLSTM:
     for idx, w in enumerate(truncatedVocab):
       self.vocab[w] = idx
 
-    print "Pickling dictionary to checkpoint/%s/dictionary.pk" % self.args.runString
+    print("Pickling dictionary to checkpoint/%s/dictionary.pk" % self.args.runString)
     try:
       os.mkdir("checkpoints/%s" % self.args.runString)
     except OSError:
