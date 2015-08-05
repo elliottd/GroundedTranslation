@@ -109,11 +109,30 @@ class VisualWordLSTM:
         self.val.append(image)
         self.valVGG.append(self.features[:,idx])
 
-    print("Extracting vocabulary")
+    self.extractVocabulary()
+    trainX, trainIX, trainY = self.createPaddedInputSequences(self.train, self.trainVGG)
+    valX, valIX, valY = self.createPaddedInputSequences(self.val, self.valVGG)
 
-    ''' Collect word frequency counts over the train / val inputs and use these
-        to create a model vocabulary. Words that appear fewer than 
-        self.args.unk times will be ignored '''
+    if self.args.debug:
+      print('trainX shape:', trainX.shape)
+      print('trainIX shape:', trainIX.shape)
+      print('trainY shape:', trainY.shape)
+    
+    if self.args.debug:
+      print('val_X shape:', valX.shape)
+      print('val_IX shape:', valIX.shape)
+      print('val_Y shape:', valY.shape)
+    
+    return trainX, trainIX, trainY, valX, valIX, valY
+
+  def extractVocabulary(self):
+    ''' 
+    Collect word frequency counts over the train / val inputs and use these
+    to create a model vocabulary. Words that appear fewer than self.args.unk 
+    times will be ignored 
+    '''
+
+    print("Extracting vocabulary")
 
     self.unkdict['<S>'] = 0
     self.unkdict['<E>'] = 0
@@ -141,21 +160,6 @@ class VisualWordLSTM:
       print(self.index2word.items())
       print(len(self.word2index))
       print(self.word2index.items())
-
-    trainX, trainIX, trainY = self.createPaddedInputSequences(self.train, self.trainVGG)
-    valX, valIX, valY = self.createPaddedInputSequences(self.val, self.valVGG)
-
-    if self.args.debug:
-      print('trainX shape:', trainX.shape)
-      print('trainIX shape:', trainIX.shape)
-      print('trainY shape:', trainY.shape)
-    
-    if self.args.debug:
-      print('val_X shape:', valX.shape)
-      print('val_IX shape:', valIX.shape)
-      print('val_Y shape:', valY.shape)
-    
-    return trainX, trainIX, trainY, valX, valIX, valY
 
   def collectCounts(self, split):
     '''
