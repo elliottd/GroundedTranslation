@@ -8,13 +8,14 @@ import math
 
 class TwoLayerLSTM:
 
-  def __init__(self, hidden_size, vocab_size, dropin, droph, optimiser, l2reg):
+  def __init__(self, hidden_size, vocab_size, dropin, droph, optimiser, l2reg, weights = None):
     self.hidden_size = hidden_size # number of units in first LSTM
     self.dropin = dropin # prob. of dropping input units
     self.droph = droph # prob. of dropping hidden->hidden units
     self.vocab_size = vocab_size # size of word vocabulary
     self.optimiser = optimiser # optimisation method
     self.l2reg = l2reg # weight regularisation penalty
+    self.weights = weights # initialise with checkpointed weights?
 
   def buildKerasModel(self):
     '''
@@ -52,6 +53,10 @@ class TwoLayerLSTM:
     model.add(Activation('time_distributed_softmax'))
     
     model.compile(loss='categorical_crossentropy', optimizer=self.optimiser)
+
+    if self.weights != None:
+      # Initialise the weights of the model
+      model.load_weights("%s/weights.hdf5" % self.weights)
 
     return model
 
