@@ -1,12 +1,4 @@
 from __future__ import print_function
-from keras.models import Sequential
-from keras.layers.core import Dense, Activation, Dropout, Merge, RepeatVector, TimeDistributedDense
-from keras.layers.recurrent import LSTM
-from keras.layers.embeddings import Embedding
-from keras.datasets.data_utils import get_file
-from keras.preprocessing import sequence
-from keras.optimizers import RMSprop, SGD, Adagrad
-from keras.regularizers import l2
 
 import numpy as np
 import h5py
@@ -26,6 +18,7 @@ import cPickle
 
 from ptbtokenizer import PTBTokenizer
 from Callbacks import CompilationOfCallbacks
+import models
 
 class VisualWordLSTM:
 
@@ -48,7 +41,13 @@ class VisualWordLSTM:
     the order of the elements in the list is _crucial_.
     '''
     trainX, trainIX, trainY, valX, valIX, valY = self.prepareInput()
-    model = self.buildKerasModel()
+
+    m = models.TwoLayerLSTM(self.args.hidden_size, len(self.vocab),
+                            self.args.dropin, self.args.droph,
+                            self.args.optimiser, self.args.l2reg)
+
+    model = m.buildKerasModel()
+
     callbacks = CompilationOfCallbacks(self.word2index, self.index2word, 
                                        valX, valIX, self.args, self.split, 
                                        self.features)
@@ -259,44 +258,6 @@ class VisualWordLSTM:
       print(vectorised_sentences.shape, vectorised_next_words.shape, vectorised_vgg.shape)
 
     return vectorised_sentences, vectorised_vgg, vectorised_next_words
-
-  def buildKerasModel(self):
-    '''
-    Define the exact structure of your model here. We create an image
-    description generation model by merging the VGG image features with
-    a word embedding model, with an LSTM over the sequences.
-
-    The order in which these appear below (text, image) is _IMMUTABLE_.
-
-    TODO: we should split this out into a static class so we can also archive
-          the exact form of the model when checkpointing data.
-    '''
-
-    print('Building Keras model...')
-
-    # We will learn word representations for each word
-    text = Sequential()
-    text.add(TimeDistributedDense(len(self.word2index), self.args.hidden_size, W_regularizer=l2(self.args.l2reg)))
-    text.add(Dropout(self.args.dropin))
-    
-    # Compress the VGG features into hidden_size
-    visual = Sequential()
-    visual.add(TimeDistributedDense(4096, self.args.hidden_size, W_regularizer=l2(self.args.l2reg)))
-    text.add(Dropout(self.args.dropin))
-
-    # The model is a merge of the VGG features and the Word Embedding vectors
-    model = Sequential()
-    model.add(Merge([text, visual], mode='sum'))
-    model.add(LSTM(self.args.hidden_size, self.args.hidden_size, return_sequences=True)) # Sequence model 
-    stacked_LSTM_size = int(math.floor(self.args.hidden_size * 0.8))
-    model.add(Dropout(self.args.droph))
-    model.add(LSTM(self.args.hidden_size, stacked_LSTM_size, return_sequences=True)) # Sequence model 
-    model.add(TimeDistributedDense(stacked_LSTM_size, len(self.word2index), W_regularizer=l2(self.args.l2reg)))
-    model.add(Activation('time_distributed_softmax'))
-    
-    model.compile(loss='categorical_crossentropy', optimizer=self.args.optimiser)
-
-    return model
 
 if __name__ == "__main__":
   parser = argparse.ArgumentParser(description="Train an word embedding model using LSTM network")
