@@ -59,7 +59,6 @@ class CompilationOfCallbacks(Callback):
     valBleu = self.__bleuScore__(path)
 
     checkpointed = self.checkpointParameters(epoch, logs, path, bleu, valBleu)
-    # copy the exact training file into the directory for replication
 
   def on_train_end(self, logs={}):
     print("Training complete")
@@ -119,6 +118,7 @@ class CompilationOfCallbacks(Callback):
     try:
       os.mkdir("checkpoints/%s/" % (prefix))
       shutil.copyfile("train.py", "checkpoints/%s/train.py" % prefix)
+      shutil.copyfile("models.py", "checkpoints/%s/models.py" % prefix)
     except OSError:
       pass # directory already exists
     try:
