@@ -1,0 +1,13 @@
+droph: 0.1
+unk: 5
+dropin: 0.5
+numSents: 5
+optimiser: adagrad
+batch_size: 100
+epochs: 50
+runString: TWO_LAYER-0.1droph
+stoppingLoss: bleu
+debug: False
+small: False
+hidden_size: 512
+l2reg: 1e-08
