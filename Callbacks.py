@@ -61,11 +61,11 @@ class CompilationOfCallbacks(Callback):
     checkpointed = self.checkpointParameters(epoch, logs, path, bleu, valBleu)
 
   def on_train_end(self, logs={}):
+    print
     print("Training complete")
-    for e in range(len(self.loss)):
-      print("Epoch %d - train loss: %.5f bleu %.2f |"\
-            " val loss: %.5f bleu %.2f" % (e, self.loss[e], self.bleu[e], 
-                                           self.val_loss[e], self.val_bleu[e]))
+    for e in range(len(self.val_loss)):
+      print("Epoch %d | val loss: %.5f bleu %.2f"
+            % (e, self.val_loss[e], self.val_bleu[e]))
 
   def extractReferences(self, directory, val=True):
     references = []
@@ -138,7 +138,7 @@ class CompilationOfCallbacks(Callback):
       handle.write("%s: %s\n" % (arg, str(val)))
     handle.close()
 
-  def checkpointParameters(self, epoch, logs, filepath, bleu, valBleu):
+  def checkpointParameters(self, epoch, logs, filepath, bleu, cur_val_bleu):
     '''
     We checkpoint the model parameters based on either PPLX reduction or
     BLEU score increase in the validation data. This is driven by the
@@ -152,24 +152,28 @@ class CompilationOfCallbacks(Callback):
 
       print("Epoch %d: | val loss %0.5f (best: %0.5f) bleu %0.2f (best %0.2f)"
             % (epoch, cur_val_loss, self.best_val_loss, 
-               valBleu, self.best_val_bleu))
+               cur_val_bleu, self.best_val_bleu))
 
       self.val_loss.append(cur_val_loss)
       self.bleu.append(bleu)
-      self.val_bleu.append(valBleu)
+      self.val_bleu.append(cur_val_bleu)
+
+      # update the best values, if applicable
+      if cur_val_loss < self.best_val_loss:
+        self.best_val_loss = cur_val_loss
+      if cur_val_bleu > self.best_val_bleu:
+        self.best_val_bleu = cur_val_bleu
 
       if self.args.stoppingLoss == 'model':
         if cur_val_loss < self.best_val_loss:
           if self.verbose > 0:
             print("Saving model because val loss decreased")
-          self.best_val_loss = cur_val_loss
           self.model.save_weights(filepath, overwrite=True)
 
       elif self.args.stoppingLoss == 'bleu':
-        if valBleu > self.best_val_bleu:
+        if cur_val_bleu > self.best_val_bleu:
           if self.verbose > 0:
             print("Saving model because bleu increased")
-          self.best_val_bleu = valBleu
           self.model.save_weights(filepath, overwrite=True)
 
     elif self.save_best_only and not self.params['do_validation']:
@@ -179,11 +183,6 @@ class CompilationOfCallbacks(Callback):
       if self.verbose > 0:
         print("Epoch %d: saving model")
         self.model.save_weights(filepath, overwrite=True)
-
-    if valBleu > self.best_val_bleu:
-      self.best_val_bleu = valBleu
-    if bleu > self.best_bleu:
-      self.best_bleu = bleu
 
   def generateSentences(self, filepath, val=True):
     prefix = "val" if val else "train"
