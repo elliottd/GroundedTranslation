@@ -49,8 +49,8 @@ class VisualWordLSTM(object):
         the word embeddings. We need to feed the data as a list, in which
         the order of the elements in the list is _crucial_.
         '''
-        trainX, trainIX, trainY, valX, valIX, valY = self.prepare_input()
         # pylint: disable=invalid-name
+        trainX, trainIX, trainY, valX, valIX, valY = self.prepare_input()
         # because what else are we going to call them
 
         m = models.TwoLayerLSTM(self.args.hidden_size, len(self.vocab),
@@ -62,7 +62,7 @@ class VisualWordLSTM(object):
                                            valX, valIX, self.args, self.split,
                                            self.features)
 
-        # TODO: Data generator will be called here.
+        # TODO: Data generator will be called/iterated over here.
         model.fit([trainX, trainIX], trainY, batch_size=self.args.batch_size,
                   validation_data=([valX, valIX], valY),
                   nb_epoch=self.args.epochs, callbacks=[callbacks], verbose=1,
@@ -121,8 +121,10 @@ class VisualWordLSTM(object):
                 self.valVGG.append(self.features[:, idx])
 
         self.extract_vocabulary()
+        # pylint: disable=invalid-name
         trainX, trainIX, trainY = self.create_padded_input_sequences(
             self.train, self.trainVGG)
+        # pylint: disable=invalid-name
         valX, valIX, valY = self.create_padded_input_sequences(
             self.val, self.valVGG)
 
@@ -154,8 +156,8 @@ class VisualWordLSTM(object):
 
         truncated_vocab = [v for v in self.unkdict
                            if self.unkdict[v] >= self.args.unk]
-        for idx, w in enumerate(truncated_vocab):
-            self.vocab[w] = idx
+        for idx, word in enumerate(truncated_vocab):
+            self.vocab[word] = idx
 
         print("Pickling dictionary to checkpoint/%s/dictionary.pk"
               % self.args.run_string)
@@ -192,7 +194,7 @@ class VisualWordLSTM(object):
         inputlen = 100 if self.args.small else len(split)  # for debugging
 
         for image in split[0:inputlen]:
-            for sentence in image['sentences'][0:self.args.numSents]:
+            for sentence in image['sentences'][0:self.args.num_sents]:
                 sentence['tokens'] = ['<S>'] + sentence['tokens'] + ['<E>']
                 for token in sentence['tokens']:
                     if token not in self.unkdict:
@@ -212,7 +214,7 @@ class VisualWordLSTM(object):
         for split in splits:
             inputlen = 100 if self.args.small else len(split)  # for debugging
             for image in split[0:inputlen]:
-                for sentence in image['sentences'][0:self.args.numSents]:
+                for sentence in image['sentences'][0:self.args.num_sents]:
                     sent = sentence['tokens']
                     sent = [w for w in sent if w in self.vocab]
                     if len(sent) > longest:
@@ -239,10 +241,10 @@ class VisualWordLSTM(object):
 
         sentences = []
         next_words = []
-        vgg = []
+        # vgg = []
 
         for idx, image in enumerate(split[0:inputlen]):
-            for sentence in image['sentences'][0:self.args.numSents]:
+            for sentence in image['sentences'][0:self.args.num_sents]:
                 sent = [w for w in sentence['tokens'] if w in self.vocab]
                 inputs = [self.word2index[x] for x in sent]
                 targets = [self.word2index[x] for x in sent[1:]]
@@ -258,14 +260,18 @@ class VisualWordLSTM(object):
 
                 sentences.append(inputs)
                 next_words.append(targets)
-                vgg.append(idx)
+                # vgg.append(idx)
 
         return self.vectorise_sequences(split, vgg_feats, sentences,
-                                        next_words, vgg)
+                                        next_words)  # , vgg)
 
-    def vectorise_sequences(self, split, vgg_feats, sentences, next_words, vgg):
+    def vectorise_sequences(self, split, vgg_feats, sentences, next_words):
+        """Removed vgg from args because unused. Bug?"""
+        # , vgg):
         inputlen = 100 if self.args.small else len(split)  # for debugging
 
+        # there is too a zeros member.
+        # pylint: disable=no-member
         vectorised_sentences = np.zeros((len(sentences), self.max_seq_len+1,
                                          len(self.vocab)))
         vectorised_next_words = np.zeros((len(sentences), self.max_seq_len+1,
@@ -274,7 +280,7 @@ class VisualWordLSTM(object):
 
         seqindex = 0
         for idx, image in enumerate(split[0:inputlen]):
-            for _ in image['sentences'][0:self.args.numSents]:
+            for _ in image['sentences'][0:self.args.num_sents]:
                 # only visual features at t=0
                 vectorised_vgg[seqindex, 0] = vgg_feats[idx]
                 for j in range(0, len(sentences[seqindex])-1):

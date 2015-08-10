@@ -6,7 +6,7 @@ from __future__ import print_function
 
 import argparse
 
-from data_munger import VisualWordDataGenerator
+from data_generator import VisualWordDataGenerator
 from Callbacks import CompilationOfCallbacks
 import models
 
@@ -22,10 +22,11 @@ class VisualWordLSTM(object):
         self.data_generator = VisualWordDataGenerator(
             self.args.big_batch_size,
             self.args.num_sents,
+            self.args.unk,
             self.args.dataset,
             self.args.features)
 
-        self.V = data_generator.get_vocab_size()
+        self.V = self.data_generator.get_vocab_size()
 
     def train_model(self):
         '''
@@ -33,9 +34,6 @@ class VisualWordLSTM(object):
         the word embeddings. We need to feed the data as a list, in which
         the order of the elements in the list is _crucial_.
         '''
-        # trainX, trainIX, trainY, valX, valIX, valY = self.prepare_input()
-        # pylint: disable=invalid-name
-        # because what else are we going to call them
 
         m = models.TwoLayerLSTM(self.args.hidden_size, self.V,
                                 self.args.dropin, self.args.droph,
@@ -50,7 +48,7 @@ class VisualWordLSTM(object):
         #                                   self.split, self.features)
         callbacks = []
 
-        if self.big_batch_size > 0:
+        if self.args.big_batch_size > 0:
             # if we are doing big batches, the main loop ends up here
             # (annoying).
             for e in range(self.args.epochs):
@@ -66,6 +64,8 @@ class VisualWordLSTM(object):
                               shuffle=True)
 
         else:
+            trainX, trainIX, trainY, valX, valIX, valY = self.data_generator.get_data()
+            # pylint: disable=invalid-name
             model.fit([trainX, trainIX],
                       trainY,
                       batch_size=self.args.batch_size,

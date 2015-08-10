@@ -18,7 +18,7 @@ from ptbtokenizer import PTBTokenizer
 
 # set up logger
 logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger('__name__')
+logger = logging.getLogger(__name__)
 
 
 class VisualWordDataGenerator(object):
@@ -29,10 +29,10 @@ class VisualWordDataGenerator(object):
     Things that need to happen:
         incremental reading of json dataset using jsaone
         Vocabulary size etc are found with a pass over the entire dataset
-        Create train/test/val split indicies
+        Create train/test/val split indicies (maybe ??)
 
     """
-    def __init__(self, big_batch_size=0, num_sents=5,
+    def __init__(self, big_batch_size=0, num_sents=5, unk=5,
                  input_dataset=None, input_features=None):
         """
         Initialise data generator: this involves loading the dataset and
@@ -40,6 +40,17 @@ class VisualWordDataGenerator(object):
         If datasets and features are not given, use flickr8k.
         """
         logger.info("Initialising data generator")
+
+        # size of chucks that the generator should return; if None returns
+        # full dataset at once.
+        self.big_batch_size = big_batch_size
+        # Number of descriptions to return per image.
+        self.num_sents = num_sents
+        self.unk = unk
+
+        # TODO
+        self.small = False
+        self.run_string = "testing_tiny_train"
 
         # TODO: all this loading, reading incrementally.
 
@@ -60,27 +71,33 @@ class VisualWordDataGenerator(object):
         self.word2index = dict()
         self.index2word = dict()
         self.max_seq_len = 0
+        # This counts number of *images* per split, not sentences.
+        self.split_sizes = {'train':0, 'val':0, 'test':0}
+        # Collects the image indices for each split to index into self.features.
+        self.split_img_indicies = {'train':set(), 'val':set(), 'test':set()}
         self.extract_vocabulary()
 
-        # size of chucks that the generator should return; if None returns
-        # full dataset at once.
-        self.big_batch_size = big_batch_size
-        # Number of descriptions to return per image.
-        self.num_sents = num_sents
 
         # TODO avoid this
         # load the image features into memory
-        # features_struct = scipy.io.loadmat(self.input_features)
-        # self.features = features_struct['feats']
-        # XXX not sure this works.
-        self.features = scipy.io.loadmat(self.input_features,
-                                           variable_names=['feats'])
+        features_struct = scipy.io.loadmat(self.input_features)
+        self.features = features_struct['feats']
+        # XXX not sure this one-liner works.
+        #self.features = scipy.io.loadmat(self.input_features,
+        #                                   variable_names=['feats'])
 
     def get_vocab_size(self):
         return len(self.word2index)
 
     def get_data(self):
-        """If not batching, just return the whole thing."""
+        """If not batching, just return the whole thing:
+        Returns trainX, trainIX, trainY, valX, valIX, valY:
+          train/valX:  input sequences constructed from the training data
+          train/valIX: visual feature vectors corresponding to each sequence.
+          train/valY:  sequences of the next words expected at each time
+                       step in the model.
+        """
+
         assert self.big_batch_size == 0
 
         # From (old) prepare_input
@@ -89,7 +106,8 @@ class VisualWordDataGenerator(object):
         self.val = []
         self.valVGG = []
 
-        for idx, image in enumerate(self.dataset['images']):
+        open_dataset = json.load(open(self.dataset, 'r'))
+        for idx, image in enumerate(open_dataset['images']):
             if image['split'] == 'train':
                 self.train.append(image)
                 self.trainVGG.append(self.features[:, idx])
@@ -111,6 +129,47 @@ class VisualWordDataGenerator(object):
         logger.debug('val_Y shape:', valY.shape)
         return trainX, trainIX, trainY, valX, valIX, valY
 
+    def new_get_data(self):
+
+        # Formerly known as trainIX and valIX
+        train_images = self.get_image_features_matrix('train')
+        val_images = self.get_image_features_matrix('val')
+
+        train_descriptions = np.zeros(self.split_sizes['train'],
+                                      self.max_seq_len+1, len(self.word2index))
+        val_descriptions = np.zeros(self.split_sizes['val'],
+                                      self.max_seq_len+1, len(self.word2index))
+
+        # I don't like this either.
+        train_index = 0
+        val_index = 0
+        for image in enumerate(self.dataset['images']):
+            if image['split'] == 'train':
+                # This will update train_descriptions
+                train_index = self.vectorise_image_descriptions(image, train_index, train_descriptions)
+            if image['split'] == 'val':
+                # This will update val_descriptions
+                val_index = self.vectorise_image_descriptions(image, val_index, val_descriptions)
+
+        # one-off move
+        train_targets = self.get_target_descriptions(train_descriptions)
+        val_targets = self.get_target_descriptions(val_descriptions)
+
+
+    def get_image_features_matrix(self, split):
+        """ Creates the image features matrix/vector for a dataset split.
+        matrix dimensions are: vgg[image_index, 0, image_features]
+        TODO: batch/incrementalise this.
+        Note that only the first (zero timestep) cell in the second dimension
+        will be non-zero.
+        """
+        vgg = np.zeros((self.split_sizes[split], self.max_seq_len+1, 4096))
+        for v_index, index in self.split_img_indicies[split]:
+            vgg[v_index, 0, :] = self.features[:,index]
+        return vgg
+
+
+
     def __next__(self):
         """
         Returns a batch of examples from split. Main generator function.
@@ -119,97 +178,22 @@ class VisualWordDataGenerator(object):
         """
         assert self.big_batch_size > 0
 
-        # incrementally read json dataset (but will this work within a
-        # generator?)
-
+        # incrementally read json dataset
         for item in jsaone.load(self.dataset):
             pass
-
-    def prepare_input(self):
-        '''
-        Transform the raw sentence tokens into a vocabulary, and a sequence of
-        inputs and predictions.
-
-        The vocabulary is constructed over the training+validation data sets.
-        The vocabulary construction process also tracks token frequency,
-        which is used for unknown token thresholding.
-
-        We add a Start-of-Sequence and End-of-Sequence token to the input in
-        the vain hope that it will help the language model better understand
-        where it may be within a long-range of tokens.
-
-        Returns trainX, trainIX, trainY, valX, valIX, valY:
-          train/valX:  input sequences constructed from the training data
-          train/valIX: visual feature vectors corresponding to each sequence.
-          train/valY:  sequences of the next words expected at each time
-                       step in the model.
-
-        Stores:
-          self.vocab and self.unkdict store the dictionary and token frequency
-          self.word2index and self.index2word store transformation maps
-          self.features stores the VGG 16 features
-          self.train/trainVGG stores the sentences+VGG feats for the train data
-          self.val/valVGG stores the sentences+VGG feats for the val data
-        '''
-
-        # TODO: all this loading incrementally.
-        # load the dataset into memory
-        self.dataset = json.load(open('flickr8k/dataset.json', 'r'))
-
-        # load the image features into memory
-        features_struct = scipy.io.loadmat('flickr8k/vgg16_feats.mat')
-        self.features = features_struct['feats']
-
-        # group images by their train/val/test split into a dict -> list
-        self.split = defaultdict(list)
-        for img in self.dataset['images']:
-            self.split[img['split']].append(img)
-
-        self.train = []
-        self.trainVGG = []
-        self.val = []
-        self.valVGG = []
-
-        for idx, image in enumerate(self.dataset['images']):
-            if image['split'] == 'train':
-                self.train.append(image)
-                self.trainVGG.append(self.features[:, idx])
-            if image['split'] == 'val':
-                self.val.append(image)
-                self.valVGG.append(self.features[:, idx])
-
-        self.extract_vocabulary()
-        trainX, trainIX, trainY = self.create_padded_input_sequences(
-            self.train, self.trainVGG)
-        valX, valIX, valY = self.create_padded_input_sequences(
-            self.val, self.valVGG)
-
-        if self.args.debug:
-            print('trainX shape:', trainX.shape)
-            print('trainIX shape:', trainIX.shape)
-            print('trainY shape:', trainY.shape)
-
-        if self.args.debug:
-            print('val_X shape:', valX.shape)
-            print('val_IX shape:', valIX.shape)
-            print('val_Y shape:', valY.shape)
-
-        return trainX, trainIX, trainY, valX, valIX, valY
 
     def extract_vocabulary(self):
         '''
         Collect word frequency counts over the train / val inputs and use
         these to create a model vocabulary. Words that appear fewer than
-        self.args.unk times will be ignored.
-        XXX: scf: not replaced with UNK?
+        self.unk times will be ignored.
 
         Also finds longest sentence, since it's already iterating over the
-        whole dataset.
-        ACTUALLY this won't work, because we only measure the length in number
-        of known (non-unk) words, so we need the unks first.
-        Except if max_seq_len/longest_sentence is just supposed to be a safe
-        upper bound, then we're good (except for lots of redundant cycles, I
-        guess).
+        whole dataset. HOWEVER this is the longest sentence *including* UNK
+        words, which are removed from the data and shouldn't really be
+        included in max_seq_len.
+        But max_seq_len/longest_sentence is just supposed to be a safe
+        upper bound, so we're good (except for some redundant cycles.)
         '''
         logger.info("Extracting vocabulary")
         open_dataset = json.load(open(self.dataset, 'r'))
@@ -219,32 +203,39 @@ class VisualWordDataGenerator(object):
 
         unk_dict = defaultdict(int)
         longest_sentence = 0
-        for idx, image in enumerate(open_dataset['images']):
+        # How to turn this into generator loop?
+        for index, image in enumerate(open_dataset['images']):
             if image['split'] in ('train', 'val'):
                 # from old collect_counts
-                for sentence in image['sentences'][0:self.args.num_sents]:
-                    # TODO: make sure the generator pads the sentence!
+                for sentence in image['sentences'][0:self.num_sents]:
                     # sentence['tokens'] = ['<S>'] + sentence['tokens']+['<E>']
+                    # XXX: do we need to keep track of beginning/end tokens?
                     unk_dict['<S>'] += 1
                     unk_dict['<E>'] += 1
                     for token in sentence['tokens']:
                         unk_dict[token] += 1
                     if len(sentence['tokens']) > longest_sentence:
                         longest_sentence = len(sentence['tokens'])
+            self.split_sizes[image['split']] += 1
+            # This assumes that images are in same order/same index in
+            # open_dataset and features (split_img_indicies is used to index
+            # into features), which seems dangerous.
+            self.split_img_indicies[image['split']].add(index)
 
-        # vocabulary is a word:id dict (superceded/identical to by word2index?)
+        # vocabulary is a word:id dict (superceded by/identical to word2index?)
+        # TODO: make <E>, <S> first indices
         vocabulary = dict(((v, i) for i, v in enumerate(unk_dict)
-                           if unk_dict[v] >= self.args.unk))
+                           if unk_dict[v] >= self.unk))
 
-        print("Pickling dictionary to checkpoint/%s/vocabulary.pk"
-              % self.args.run_string)
+        logger.info("Pickling dictionary to checkpoint/%s/vocabulary.pk"
+              % self.run_string)
         try:
-            os.mkdir("checkpoints/%s" % self.args.run_string)
+            os.mkdir("checkpoints/%s" % self.run_string)
         except OSError:
             pass
         cPickle.dump(vocabulary,
                      open("checkpoints/%s/vocabulary.pk"
-                          % self.args.run_string, "wb"))
+                          % self.run_string, "wb"))
 
         self.index2word = dict((v, k) for k, v in vocabulary.iteritems())
         self.word2index = vocabulary
@@ -252,10 +243,34 @@ class VisualWordDataGenerator(object):
 
         self.max_seq_len = longest_sentence
 
-        logger.debug("Number of indices", len(self.index2word))
+        logger.info("Number of indices", len(self.index2word))
         logger.debug("index2word:", self.index2word.items())
-        logger.debug("Number of words", len(self.word2index))
+        logger.info("Number of words", len(self.word2index))
         logger.debug("word2index", self.word2index.items())
+
+    def vectorise_image_descriptions(self, image, index, description_array):
+        """ Update description_array with descriptions belonging to image.
+        Array format: description_array[desc_index, timestep, word_index]
+        """
+        for sentence in image['sentences'][0:self.num_sents]:
+            seq = self.format_sequence(sentence['tokens'])
+            description_array[index, :, :] = seq
+            index += 1
+        return index
+
+
+    def format_sequence(self, sequence):
+        """ Transforms one sequence (description) into input matrix
+        (timesteps, vocab-onehot)
+        """
+        # TODO pass around description_array, write into there directly
+        # TODO FIX buffer with bos and eos words!!!
+        seq_array = np.zeros((self.max_seq_len+1, len(self.word2index)))
+        w_indices = [self.word2index[w] for w in sequence if w in self.word2index]
+        for time, vocab in enumerate(w_indices):
+            seq_array[time, vocab] += 1
+        return seq_array
+
 
     def create_padded_input_sequences(self, split, vgg_feats):
         '''
@@ -275,7 +290,7 @@ class VisualWordDataGenerator(object):
         # TODO replace max_seq_len with batch_max_seq_len
         '''
 
-        inputlen = 100 if self.args.small else len(split)  # for debugging
+        inputlen = 100 if self.small else len(split)  # for debugging
 
         sentences = []
         next_words = []
@@ -303,19 +318,19 @@ class VisualWordDataGenerator(object):
 
     def vectorise_sequences(self, split, vgg_feats, sentences, next_words,
                             vgg):
-        inputlen = 100 if self.args.small else len(split)  # for debugging
+        inputlen = 100 if self.small else len(split)  # for debugging
 
         vectorised_sentences = np.zeros((len(sentences), self.max_seq_len+1,
-                                         len(self.vocab)))
+                                         len(self.word2index)))
         vectorised_next_words = np.zeros((len(sentences), self.max_seq_len+1,
-                                          len(self.vocab)))
+                                          len(self.word2index)))
         vectorised_vgg = np.zeros((len(sentences), self.max_seq_len+1, 4096))
 
         seqindex = 0
         for idx, image in enumerate(split[0:inputlen]):
-            for _ in image['sentences'][0:self.args.numSents]:
+            for _ in image['sentences'][0:self.num_sents]:
                 # only visual features at t=0
-                vectorised_vgg[seqindex, 0] = vgg_feats[idx]
+                vectorised_vgg[seqindex, 0, :] = vgg_feats[idx]
                 for j in range(0, len(sentences[seqindex])-1):
                     vectorised_sentences[seqindex, j,
                                          sentences[seqindex][j]] = 1.

@@ -120,10 +120,10 @@ class CompilationOfCallbacks(Callback):
     def createCheckpointDirectory(self, epoch, savetime):
         '''
         We will create one directory to store all of the epochs data inside.
-        The name is based on the runString (if provided) or the current time.
+        The name is based on the run_string (if provided) or the current time.
         '''
 
-        prefix = self.args.runString if self.args.runString != "" else ""
+        prefix = self.args.run_string if self.args.run_string != "" else ""
         filepath = "checkpoints/%s/epoch%03d-%s" % ((prefix, epoch, savetime))
         try:
             os.mkdir("checkpoints/%s/" % (prefix))
@@ -153,7 +153,7 @@ class CompilationOfCallbacks(Callback):
         '''
         We checkpoint the model parameters based on either PPLX reduction or
         BLEU score increase in the validation data. This is driven by the
-        user-specified argument self.args.stoppingLoss.
+        user-specified argument self.args.stopping_loss.
         '''
 
         filepath = "%s/weights.hdf5" % filepath
@@ -175,13 +175,13 @@ class CompilationOfCallbacks(Callback):
         if cur_val_bleu > self.best_val_bleu:
             self.best_val_bleu = cur_val_bleu
 
-        if self.args.stoppingLoss == 'model':
+        if self.args.stopping_loss == 'model':
             if cur_val_loss < self.best_val_loss:
                 if self.verbose > 0:
                     print("Saving model because val loss decreased")
                 self.model.save_weights(filepath, overwrite=True)
 
-        elif self.args.stoppingLoss == 'bleu':
+        elif self.args.stopping_loss == 'bleu':
             if cur_val_bleu > self.best_val_bleu:
                 if self.verbose > 0:
                     print("Saving model because bleu increased")
@@ -236,4 +236,3 @@ class CompilationOfCallbacks(Callback):
                                                        s[1:])]) + "\n")
 
         handle.close()
-
