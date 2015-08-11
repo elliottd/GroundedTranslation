@@ -3,10 +3,10 @@ import h5py
 import numpy as np
 import scipy.io
 
-jdata = json.load(open("flickr8k/dataset.json"))
-features_struct = scipy.io.loadmat('flickr8k/vgg_feats.mat')['feats']
+jdata = json.load(open("../flickr8k/dataset.json"))
+features_struct = scipy.io.loadmat('../flickr8k/vgg_feats.mat')['feats']
 
-h5output = h5py.File("flickr8k.h5", "w")
+h5output = h5py.File("../flickr8k/flickr8k.h5", "w")
 
 # The HDF5 file will contain a top-level group for each split
 train = h5output.create_group("train")
