@@ -5,10 +5,15 @@ Entry module and class module for training a VisualWordLSTM.
 from __future__ import print_function
 
 import argparse
+import logging
 
-from data_generator import VisualWordDataGenerator
 from Callbacks import CompilationOfCallbacks
+from data_generator import VisualWordDataGenerator
 import models
+
+# Set up logger
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
 
 
 class VisualWordLSTM(object):
@@ -20,11 +25,7 @@ class VisualWordLSTM(object):
         self.args = args
 
         self.data_generator = VisualWordDataGenerator(
-            self.args.big_batch_size,
-            self.args.num_sents,
-            self.args.unk,
-            self.args.dataset,
-            self.args.features)
+            self.args, self.args.dataset)
 
         self.V = self.data_generator.get_vocab_size()
 
@@ -40,31 +41,43 @@ class VisualWordLSTM(object):
                                 self.args.optimiser, self.args.l2reg)
         model = m.buildKerasModel()
 
-        # TODO: deal with this later
-        # note that split is a dict of the entire dataset
-        # callbacks = CompilationOfCallbacks(self.data_generator.word2index,
-        #                                   self.data_generator.index2word,
-        #                                   valX, valIX, self.args,
-        #                                   self.split, self.features)
-        callbacks = []
+        # Keras doesn't do batching of val set, so
+        # assume val data is small enough to get all at once.
+        valX, valIX, valY = self.data_generator.get_data_by_split('val')
+
+        callbacks = CompilationOfCallbacks(self.data_generator.word2index,
+                                           self.data_generator.index2word,
+                                           self.args,
+                                           self.args.dataset)
 
         if self.args.big_batch_size > 0:
             # if we are doing big batches, the main loop ends up here
-            # (annoying).
-            for e in range(self.args.epochs):
-                # TODO: val data also needs to be generatored
-
-                for trainX, trainIX, trainY in self.data_generator():
-                    model.fit([trainX, trainIX],
-                              trainY,
-                              validation_data=([valX, valIX], valY),
-                              nb_epoch=1,
-                              callbacks=[callbacks],
-                              verbose=1,
-                              shuffle=True)
+            for epoch in range(self.args.epochs):
+                logger.info("Epoch %d", epoch)
+                batch = 0
+                for trainX, trainIX, trainY in\
+                    self.data_generator.yield_training_batch():
+                    logger.info("Big-batch %d", batch)
+                    if not batch:  # first batch
+                        model.fit([trainX, trainIX],
+                                  trainY,
+                                  validation_data=([valX, valIX], valY),
+                                  nb_epoch=1,
+                                  callbacks=[callbacks],
+                                  verbose=1,
+                                  shuffle=True)
+                    else:  # no callbacks # TODO: no validation?
+                        model.fit([trainX, trainIX],
+                                  trainY,
+                                  validation_data=([valX, valIX], valY),
+                                  nb_epoch=1,
+                                  verbose=1,
+                                  shuffle=True)
+                    batch += 1
 
         else:
-            trainX, trainIX, trainY, valX, valIX, valY = self.data_generator.get_data()
+            # Train model on full dataset all at once, as usual.
+            trainX, trainIX, trainY = self.data_generator.get_data_by_split('train')
             # pylint: disable=invalid-name
             model.fit([trainX, trainIX],
                       trainY,
@@ -89,10 +102,9 @@ if __name__ == "__main__":
     parser.add_argument("--num_sents", default=5, type=int,
         help="Number of descriptions per image to use for training")
 
-    parser.add_argument("--dataset", default="", type=str, help="Name of JSON\
+    parser.add_argument("--dataset", default="", type=str, help="Name of HDF5\
                         dataset to use as input (defaults to flickr8k)")
-    parser.add_argument("--features", default="", type=str, help="Name of\
-                        .mat feature matrix to use (defaults to flickr8k)")
+
     parser.add_argument("--big_batch_size", default=0, type=int,
                         help="Number of examples to load from disk at a time;\
                         0 (default) loads entire dataset")

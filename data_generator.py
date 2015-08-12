@@ -6,181 +6,205 @@ from __future__ import print_function
 
 from collections import defaultdict
 import cPickle
-import json
-import jsaone  # uses cython; rebuild (see its README) if not working.
+import h5py
 import logging
 import numpy as np
 import os
-import scipy
-import scipy.io
 
-from ptbtokenizer import PTBTokenizer
-
-# set up logger
+# Set up logger
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
+
+# Strings for beginning, end of sentence, padding
+# These get specified indices in word2index
+BOS = "<S>"  # index 1
+EOS = "<E>"  # index 2
+PAD = "<P>"  # index 0
+
+# Dimensionality of image feature vector
+IMG_FEATS = 4096
 
 
 class VisualWordDataGenerator(object):
     """
-    Creates data generators for VisualWordLSTM input.
-    (Extracted from VisualWordLSTM class)
+    Creates input arrays for VisualWordLSTM and deals with input dataset in
+    general. Input dataset must now be in HTF5 format.
 
-    Things that need to happen:
-        incremental reading of json dataset using jsaone
-        Vocabulary size etc are found with a pass over the entire dataset
-        Create train/test/val split indicies (maybe ??)
-
+    Important methods:
+        yield_training_batch() is a generator function that yields large
+            batches from the training data split (in case training is too large to
+            fit in memory)
+        get_data_by_split(split) returns the required arrays (descriptions,
+            images, targets) for the dataset split (train/val/test/as given by
+            the hdf5 dataset keys)
     """
-    def __init__(self, big_batch_size=0, num_sents=5, unk=5,
-                 input_dataset=None, input_features=None):
+    def __init__(self, args_dict, input_dataset=None):
         """
         Initialise data generator: this involves loading the dataset and
         generating vocabulary sizes.
-        If datasets and features are not given, use flickr8k.
+        If dataset is not given, use flickr8k.h5.
         """
         logger.info("Initialising data generator")
 
-        # size of chucks that the generator should return; if None returns
-        # full dataset at once.
-        self.big_batch_size = big_batch_size
+        # size of chucks that the generator should return;
+        # if None returns full dataset at once.
+        self.big_batch_size = args_dict.big_batch_size  # default 0
         # Number of descriptions to return per image.
-        self.num_sents = num_sents
-        self.unk = unk
+        self.num_sents = args_dict.num_sents  # default 5 (for flickr8k)
+        self.unk = args_dict.unk  # default 5
 
-        # TODO
-        self.small = False
-        self.run_string = "testing_tiny_train"
+        self.small = args_dict.small  # default False
+        if self.small:
+            logger.warn("--small: Truncating datasets!")
+        self.run_string = args_dict.run_string
 
-        # TODO: all this loading, reading incrementally.
-
-        # load the dataset into memory
-        self.dataset = input_dataset
-        if not self.dataset:
+        if not input_dataset:
             logger.warn("No dataset given, using flickr8k")
-            self.dataset = 'flickr8k/dataset.json'
+            self.dataset = h5py.File("flickr8k/flickr8k.h5", "r")
+        else:
+            self.dataset = h5py.File(input_dataset, "r")
 
-        # load the image features into memory
-        self.input_features = input_features
-        if not input_features:
-            logger.warn("No features given, using flickr8k")
-            self.input_features = 'flickr8k/vgg16_feats.mat'
-            # features_struct = scipy.io.loadmat('flickr8k/vgg16_feats.mat')
-
-        # these variables are filled by extract_vocabulary
+        # These variables are filled by extract_vocabulary
         self.word2index = dict()
         self.index2word = dict()
+        # This is set to include BOS & EOS padding
         self.max_seq_len = 0
-        # This counts number of *images* per split, not sentences.
-        self.split_sizes = {'train':0, 'val':0, 'test':0}
-        # Collects the image indices for each split to index into self.features.
-        self.split_img_indicies = {'train':set(), 'val':set(), 'test':set()}
+        # Can check after extract_vocabulary what the actual max seq length is
+        # (including padding)
+        self.actual_max_seq_len = 0
+
+        # This counts number of descriptions per split
+        # Ignores test for now (change in extract_vocabulary)
+        self.split_sizes = {'train': 0, 'val': 0, 'test': 0}
+        # Call this to fill word2index etc.
         self.extract_vocabulary()
 
-
-        # TODO avoid this
-        # load the image features into memory
-        features_struct = scipy.io.loadmat(self.input_features)
-        self.features = features_struct['feats']
-        # XXX not sure this one-liner works.
-        #self.features = scipy.io.loadmat(self.input_features,
-        #                                   variable_names=['feats'])
-
     def get_vocab_size(self):
+        """Return training (currently also +val) vocabulary size."""
         return len(self.word2index)
 
-    def get_data(self):
-        """If not batching, just return the whole thing:
-        Returns trainX, trainIX, trainY, valX, valIX, valY:
-          train/valX:  input sequences constructed from the training data
-          train/valIX: visual feature vectors corresponding to each sequence.
-          train/valY:  sequences of the next words expected at each time
-                       step in the model.
+    def yield_training_batch(self):
+        """
+        Returns a batch of training examples.
+
+        Uses hdf5 dataset.
+        """
+        assert self.big_batch_size > 0
+        logger.info("Generating training data batch")
+
+        dscrp_array = np.zeros((self.big_batch_size,
+                                self.max_seq_len,
+                                len(self.word2index)))
+        img_array = np.zeros((self.big_batch_size,
+                              self.max_seq_len,
+                              IMG_FEATS))
+
+        num_descriptions = 0  # indexing descriptions found so far
+        batch_max_seq_len = 0
+        # Iterate over *images* in training split
+        for data_key in self.dataset['train']:
+            ds = self.dataset['train'][data_key]['descriptions']
+            for description in ds:
+                batch_index = num_descriptions % self.big_batch_size
+                # Return (filled0 big_batch array
+                if (batch_index == 0) and (num_descriptions > 0):
+                    # Truncate descriptions to max length of batch (plus
+                    # 3, for padding and safety)
+                    dscrp_array = dscrp_array[:, :(batch_max_seq_len + 3), :]
+                    img_array = img_array[:, :(batch_max_seq_len + 3), :]
+                    targets = self.get_target_descriptions(dscrp_array)
+                    yield (dscrp_array, img_array, targets)
+                    # Testing multiple big batches
+                    if self.small and num_descriptions > 3000:
+                        logger.warn("Breaking out of yield_training_batch")
+                        break
+                    dscrp_array = np.zeros((self.big_batch_size,
+                                            self.max_seq_len,
+                                            len(self.word2index)))
+                    img_array = np.zeros((self.big_batch_size,
+                                          self.max_seq_len, IMG_FEATS))
+
+                # Breaking out of nested loop (braindead)
+                # TODO: replace this with an exception
+                if self.small and num_descriptions > 3000:
+                    break
+
+                if len(description.split()) > batch_max_seq_len:
+                    batch_max_seq_len = len(description.split())
+                dscrp_array[batch_index, :, :] = self.format_sequence(
+                    description.split())
+                img_array[batch_index, :, :] = self.get_image_features(
+                    'train', data_key)
+                num_descriptions += 1
+
+            # Breaking out of nested loop (braindead)
+            if self.small and num_descriptions > 3000:
+                break
+
+    def get_data_by_split(self, split):
+        """ Gets all input data for model for a given split (ie. train, val,
+        test).
+        Returns tuple of numpy arrays:
+            descriptions: input array for text LSTM [item, timestep,
+                vocab_onehot]
+            image: input array of image features [item,
+                timestep, img_feats at timestep=0 else 0]
+            targets: target array for text LSTM (same format and data as
+                descriptions, timeshifted)
         """
 
-        assert self.big_batch_size == 0
+        logger.info("Making data for %s", split)
 
-        # From (old) prepare_input
-        self.train = []
-        self.trainVGG = []
-        self.val = []
-        self.valVGG = []
+        split_size = self.split_sizes[split]
+        if self.small:
+            split_size = 100
 
-        open_dataset = json.load(open(self.dataset, 'r'))
-        for idx, image in enumerate(open_dataset['images']):
-            if image['split'] == 'train':
-                self.train.append(image)
-                self.trainVGG.append(self.features[:, idx])
-            if image['split'] == 'val':
-                self.val.append(image)
-                self.valVGG.append(self.features[:, idx])
+        dscrp_array = np.zeros((split_size, self.max_seq_len,
+                                len(self.word2index)))
+        img_array = np.zeros((split_size, self.max_seq_len, IMG_FEATS))
 
-        trainX, trainIX, trainY = self.create_padded_input_sequences(
-            self.train, self.trainVGG)
-        valX, valIX, valY = self.create_padded_input_sequences(
-            self.val, self.valVGG)
+        d_idx = 0  # description index
+        for data_key in self.dataset[split]:
+            ds = self.dataset[split][data_key]['descriptions']
+            for description in ds:
+                dscrp_array[d_idx, :, :] = self.format_sequence(
+                    description.split())
+                img_array[d_idx, :, :] = self.get_image_features(
+                    split, data_key)
+                d_idx += 1
+                if d_idx >= split_size:
+                    break
+            # This is a stupid way to break out of a nested for-loop
+            if d_idx >= split_size:
+                break
 
-        logger.debug('trainX shape:', trainX.shape)
-        logger.debug('trainIX shape:', trainIX.shape)
-        logger.debug('trainY shape:', trainY.shape)
+        targets = self.get_target_descriptions(dscrp_array)
 
-        logger.debug('val_X shape:', valX.shape)
-        logger.debug('val_IX shape:', valIX.shape)
-        logger.debug('val_Y shape:', valY.shape)
-        return trainX, trainIX, trainY, valX, valIX, valY
-
-    def new_get_data(self):
-
-        # Formerly known as trainIX and valIX
-        train_images = self.get_image_features_matrix('train')
-        val_images = self.get_image_features_matrix('val')
-
-        train_descriptions = np.zeros(self.split_sizes['train'],
-                                      self.max_seq_len+1, len(self.word2index))
-        val_descriptions = np.zeros(self.split_sizes['val'],
-                                      self.max_seq_len+1, len(self.word2index))
-
-        # I don't like this either.
-        train_index = 0
-        val_index = 0
-        for image in enumerate(self.dataset['images']):
-            if image['split'] == 'train':
-                # This will update train_descriptions
-                train_index = self.vectorise_image_descriptions(image, train_index, train_descriptions)
-            if image['split'] == 'val':
-                # This will update val_descriptions
-                val_index = self.vectorise_image_descriptions(image, val_index, val_descriptions)
-
-        # one-off move
-        train_targets = self.get_target_descriptions(train_descriptions)
-        val_targets = self.get_target_descriptions(val_descriptions)
-
+        logger.info("actual max_seq_len in split %s: %d",
+                    split, self.actual_max_seq_len)
+        # TODO: truncate dscrp_array, img_array, targets
+        # to actual_max_seq_len (+ padding)
+        return (dscrp_array, img_array, targets)
 
     def get_image_features_matrix(self, split):
         """ Creates the image features matrix/vector for a dataset split.
-        matrix dimensions are: vgg[image_index, 0, image_features]
-        TODO: batch/incrementalise this.
         Note that only the first (zero timestep) cell in the second dimension
         will be non-zero.
         """
-        vgg = np.zeros((self.split_sizes[split], self.max_seq_len+1, 4096))
-        for v_index, index in self.split_img_indicies[split]:
-            vgg[v_index, 0, :] = self.features[:,index]
-        return vgg
+        split_size = self.split_sizes[split]
+        if self.small:
+            split_size = 100
 
+        img_array = np.zeros((split_size, self.max_seq_len, IMG_FEATS))
+        for idx, data_key in enumerate(self.dataset[split]):
+            if self.small and idx >= split_size:
+                break
+            img_array[idx, 0, :] = self.get_image_features(split, data_key)
+        return img_array
 
-
-    def __next__(self):
-        """
-        Returns a batch of examples from split. Main generator function.
-        XXX: can we keep track of multiple split indicies at the same time?
-        What to do about val??
-        """
-        assert self.big_batch_size > 0
-
-        # incrementally read json dataset
-        for item in jsaone.load(self.dataset):
-            pass
+    def get_image_features(self, split, data_key):
+        """ Return image features vector for split[data_key]."""
+        return self.dataset[split][data_key]['img_feats'][:]
 
     def extract_vocabulary(self):
         '''
@@ -196,39 +220,41 @@ class VisualWordDataGenerator(object):
         upper bound, so we're good (except for some redundant cycles.)
         '''
         logger.info("Extracting vocabulary")
-        open_dataset = json.load(open(self.dataset, 'r'))
-
-        # TODO: add something here to make limiting to small dataset possible
-        # (or do it in __init__?)
 
         unk_dict = defaultdict(int)
         longest_sentence = 0
-        # How to turn this into generator loop?
-        for index, image in enumerate(open_dataset['images']):
-            if image['split'] in ('train', 'val'):
-                # from old collect_counts
-                for sentence in image['sentences'][0:self.num_sents]:
-                    # sentence['tokens'] = ['<S>'] + sentence['tokens']+['<E>']
-                    # XXX: do we need to keep track of beginning/end tokens?
-                    unk_dict['<S>'] += 1
-                    unk_dict['<E>'] += 1
-                    for token in sentence['tokens']:
-                        unk_dict[token] += 1
-                    if len(sentence['tokens']) > longest_sentence:
-                        longest_sentence = len(sentence['tokens'])
-            self.split_sizes[image['split']] += 1
-            # This assumes that images are in same order/same index in
-            # open_dataset and features (split_img_indicies is used to index
-            # into features), which seems dangerous.
-            self.split_img_indicies[image['split']].add(index)
+
+        for data_key in self.dataset['train']:
+            for description in self.dataset['train'][data_key]['descriptions']:
+                for token in description.split():
+                    unk_dict[token] += 1
+                if len(description.split()) > longest_sentence:
+                    longest_sentence = len(description.split())
+                self.split_sizes['train'] += 1
+
+        # Also check val for longest sentence (but not vocabulary!)
+        for data_key in self.dataset['val']:
+            for description in self.dataset['val'][data_key]['descriptions']:
+                # TODO Comment out/delete these two lines because val data
+                # should not be in vocabulary.
+                for token in description.split():
+                    unk_dict[token] += 1
+                if len(description.split()) > longest_sentence:
+                    longest_sentence = len(description.split())
+                self.split_sizes['val'] += 1
 
         # vocabulary is a word:id dict (superceded by/identical to word2index?)
-        # TODO: make <E>, <S> first indices
-        vocabulary = dict(((v, i) for i, v in enumerate(unk_dict)
-                           if unk_dict[v] >= self.unk))
+        # <S>, <E> are special first indices
+        vocabulary = {PAD: 0, BOS: 1, EOS: 2}
+        for v in unk_dict:
+            if unk_dict[v] > self.unk:
+                vocabulary[v] = len(vocabulary)
 
-        logger.info("Pickling dictionary to checkpoint/%s/vocabulary.pk"
-              % self.run_string)
+        assert vocabulary[BOS] == 1
+        assert vocabulary[EOS] == 2
+
+        logger.info("Pickling dictionary to checkpoint/%s/vocabulary.pk",
+                    self.run_string)
         try:
             os.mkdir("checkpoints/%s" % self.run_string)
         except OSError:
@@ -239,14 +265,17 @@ class VisualWordDataGenerator(object):
 
         self.index2word = dict((v, k) for k, v in vocabulary.iteritems())
         self.word2index = vocabulary
-        # self.word2index = dict((k, v) for k, v in vocabulary.iteritems())
 
-        self.max_seq_len = longest_sentence
+        self.max_seq_len = longest_sentence + 2
+        logger.info("Max seq length %d, setting max_seq_len to %d",
+                    longest_sentence, self.max_seq_len)
 
-        logger.info("Number of indices", len(self.index2word))
-        logger.debug("index2word:", self.index2word.items())
-        logger.info("Number of words", len(self.word2index))
-        logger.debug("word2index", self.word2index.items())
+        logger.info("Split sizes %s", self.split_sizes)
+
+        logger.info("Number of words %d", len(self.word2index))
+        logger.debug("word2index %s", self.word2index.items())
+        logger.debug("Number of indices %d", len(self.index2word))
+        logger.debug("index2word: %s", self.index2word.items())
 
     def vectorise_image_descriptions(self, image, index, description_array):
         """ Update description_array with descriptions belonging to image.
@@ -258,87 +287,33 @@ class VisualWordDataGenerator(object):
             index += 1
         return index
 
-
     def format_sequence(self, sequence):
         """ Transforms one sequence (description) into input matrix
         (timesteps, vocab-onehot)
+        TODO: may need to add another (-1) timestep for image description
+        TODO: add tokenization!
         """
-        # TODO pass around description_array, write into there directly
-        # TODO FIX buffer with bos and eos words!!!
-        seq_array = np.zeros((self.max_seq_len+1, len(self.word2index)))
-        w_indices = [self.word2index[w] for w in sequence if w in self.word2index]
+        # zero default value equals padding
+        seq_array = np.zeros((self.max_seq_len, len(self.word2index)))
+        w_indices = [self.word2index[w] for w in sequence
+                     if w in self.word2index]
+        if len(w_indices) > self.actual_max_seq_len:
+            self.actual_max_seq_len = len(w_indices)
+
+        seq_array[0, self.word2index[BOS]] += 1  # BOS token at zero timestep
         for time, vocab in enumerate(w_indices):
-            seq_array[time, vocab] += 1
+            seq_array[time + 1, vocab] += 1
+        # add EOS token at end of sentence
+        assert time + 1 == len(w_indices),\
+                "time %d len w_indices %d seq_array %s" % (
+                    time, len(w_indices), seq_array)
+        seq_array[len(w_indices) + 1, self.word2index[EOS]] += 1
         return seq_array
 
-
-    def create_padded_input_sequences(self, split, vgg_feats):
-        '''
-        Creates padding input sequences of the text and visual features.
-        The visual features are only present in the first step.
-
-        <S> The boy ate cheese with a spoon <E> with a max_seq_len=10 would be
-        transformed into
-
-        inputs  = [<S>, the, boy, ate,    cheese, with, a, spoon, <E>, <E>]
-        targets = [the, boy, ate, cheese, with,   a,    spoon,    <E>, <E>]
-        vis     = [...,    ,    ,       ,     ,    ,         ,       ,    ]
-
-        TODO: allow left/right padding, given a parameter
-
-        # TODO: make sure the generator pads the sentence!
-        # TODO replace max_seq_len with batch_max_seq_len
-        '''
-
-        inputlen = 100 if self.small else len(split)  # for debugging
-
-        sentences = []
-        next_words = []
-        vgg = []
-
-        for idx, image in enumerate(split[0:inputlen]):
-            for sentence in image['sentences'][0:self.num_sents]:
-                sent = [w for w in sentence['tokens'] if w in self.word2index]
-                inputs = [self.word2index[x] for x in sent]
-                targets = [self.word2index[x] for x in sent[1:]]
-
-                # right pad the sequences to the same length because Keras
-                # needs this for batch processing
-                inputs.extend([self.word2index['<E>']
-                               for x in range(0, self.max_seq_len+1 - len(inputs))])
-                targets.extend([self.word2index['<E>']
-                                for x in range(0, self.max_seq_len+1 - len(targets))])
-
-                sentences.append(inputs)
-                next_words.append(targets)
-                vgg.append(idx)
-
-        return self.vectorise_sequences(split, vgg_feats, sentences,
-                                        next_words, vgg)
-
-    def vectorise_sequences(self, split, vgg_feats, sentences, next_words,
-                            vgg):
-        inputlen = 100 if self.small else len(split)  # for debugging
-
-        vectorised_sentences = np.zeros((len(sentences), self.max_seq_len+1,
-                                         len(self.word2index)))
-        vectorised_next_words = np.zeros((len(sentences), self.max_seq_len+1,
-                                          len(self.word2index)))
-        vectorised_vgg = np.zeros((len(sentences), self.max_seq_len+1, 4096))
-
-        seqindex = 0
-        for idx, image in enumerate(split[0:inputlen]):
-            for _ in image['sentences'][0:self.num_sents]:
-                # only visual features at t=0
-                vectorised_vgg[seqindex, 0, :] = vgg_feats[idx]
-                for j in range(0, len(sentences[seqindex])-1):
-                    vectorised_sentences[seqindex, j,
-                                         sentences[seqindex][j]] = 1.
-                    vectorised_next_words[seqindex, j,
-                                          next_words[seqindex][j]] = 1.
-                seqindex += 1
-
-        logger.debug(vectorised_sentences.shape, vectorised_next_words.shape,
-                  vectorised_vgg.shape)
-
-        return vectorised_sentences, vectorised_vgg, vectorised_next_words
+    def get_target_descriptions(self, input_array):
+        """ Target is always _next_ word, so we move input_array over by -1
+        timestep (target at t=1 is input at t=2).
+        """
+        target_array = np.zeros(input_array.shape)
+        target_array[:, :-1, :] = input_array[:, 1:, :]
+        return target_array

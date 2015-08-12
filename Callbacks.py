@@ -1,19 +1,32 @@
+"""
+Module to do callbacks for Keras models.
+"""
+
 from keras.callbacks import Callback  # ModelCheckpoint , EarlyStopping
 
-from time import gmtime, strftime
-import os
+import h5py
 import itertools
+import logging
+import numpy as np
+import os
 import subprocess
 import shutil
 import sys
+from time import gmtime, strftime
 
-import numpy as np
+
+# Set up logger
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
+
+# Dimensionality of image feature vector
+IMG_FEATS = 4096
 
 
 class CompilationOfCallbacks(Callback):
+    """ Collection of compiled callbacks."""
 
-    def __init__(self, word2index, index2word, valX, valIX, argsDict, splits,
-                 feats):
+    def __init__(self, word2index, index2word, argsDict, dataset):
         super(Callback, self).__init__()
 
         self.verbose = True
@@ -35,58 +48,61 @@ class CompilationOfCallbacks(Callback):
 
         self.word2index = word2index
         self.index2word = index2word
-        self.valWords = valX
-        self.valImageFeats = valIX
         self.args = argsDict
-        self.split = splits
-        self.features = feats
+
+        # this results in two file handlers for dataset (here and
+        # data_generator)
+        if not dataset:
+            logger.warn("No dataset given, using flickr8k")
+            self.dataset = h5py.File("flickr8k/flickr8k.h5", "r")
+        else:
+            self.dataset = h5py.File(dataset, "r")
 
     def on_epoch_end(self, epoch, logs={}):
         '''
         At the end of each epoch we
           1. create a directory to checkpoint data
           2. save the arguments used to initialise the run
-          3. generate N sentences in the validation data by sampling from the model
+          3. generate N sentences in the val data by sampling from the model
           4. calculate BLEU score of the generated sentences
           5. decide whether to save the model parameters using BLEU
         '''
         savetime = strftime("%d%m%Y-%H%M%S", gmtime())
-        path = self.createCheckpointDirectory(epoch, savetime)
-        self.saveRunArguments(path)
+        path = self.create_checkpoint_directory(epoch, savetime)
+        self.save_run_arguments(path)
+
         # Generate training and val sentences to check for overfitting
+        self.generate_sentences(path, val=False)
+        bleu = self.__bleu_score__(path, val=False)
+        self.generate_sentences(path)
+        val_bleu = self.__bleu_score__(path)
 
-        self.generateSentences(path, val=False)
-        bleu = self.__bleuScore__(path, val=False)
-        self.generateSentences(path)
-        valBleu = self.__bleuScore__(path)
-
-        # checkpointParameters doesn't return anything; checkpointed is unused.
-        checkpointed = self.checkpointParameters(epoch, logs, path, bleu,
-                                                 valBleu)
+        self.checkpoint_parameters(epoch, logs, path, bleu, val_bleu)
 
     def on_train_end(self, logs={}):
-        print
-        print("Training complete")
-        for e in range(len(self.val_loss)):
+        logger.info("Training complete")
+        for epoch in range(len(self.val_loss)):
             print("Epoch %d | val loss: %.5f bleu %.2f"
-                  % (e, self.val_loss[e], self.val_bleu[e]))
+                  % (epoch, self.val_loss[epoch], self.val_bleu[epoch]))
 
-    def extractReferences(self, directory, val=True):
+    def extract_references(self, directory, val=True):
+        """
+        Get reference descriptions for val, training subsection.
+        """
         references = []
 
         if val:
-            for image in self.split['val']:
+            for data_key in self.dataset['val']:
                 this_image = []
-                for sentence in image['sentences']:
-                    sent = sentence['tokens']
-                    this_image.append(' '.join([x for x in sent[1:-1]]))
+                for descr in self.dataset['val'][data_key]['descriptions']:
+                    this_image.append(descr)
                 references.append(this_image)
-        else:
-            for image in self.split['train'][3000:4000]:  # middle sample for good luck
+        else:  # training: middle sample for good luck
+            for int_data_key in xrange(3000, 4000):
                 this_image = []
-                for sentence in image['sentences']:
-                    sent = sentence['tokens']
-                    this_image.append(' '.join([x for x in sent[1:-1]]))
+                for description in self.dataset['train']\
+                                   [str(int_data_key)]['descriptions']:
+                    this_image.append(description)
                 references.append(this_image)
 
         for refid in xrange(len(references[0])):
@@ -94,7 +110,7 @@ class CompilationOfCallbacks(Callback):
                                             else "train", refid),
                  'w').write('\n'.join([x[refid] for x in references]))
 
-    def __bleuScore__(self, directory, val=True):
+    def __bleu_score__(self, directory, val=True):
         '''
         PPLX is only weakly correlated with improvements in BLEU,
         and thus improvements in human judgements. Let's also track
@@ -104,7 +120,7 @@ class CompilationOfCallbacks(Callback):
 
         prefix = "val" if val else "train"
 
-        self.extractReferences(directory, val)
+        self.extract_references(directory, val)
 
         subprocess.check_call(
             ['perl multi-bleu.perl %s/%s_reference.ref < %s/%sGenerated > %s/%sBLEU'
@@ -117,7 +133,7 @@ class CompilationOfCallbacks(Callback):
         bleu = float(bleuscore.lstrip())
         return bleu
 
-    def createCheckpointDirectory(self, epoch, savetime):
+    def create_checkpoint_directory(self, epoch, savetime):
         '''
         We will create one directory to store all of the epochs data inside.
         The name is based on the run_string (if provided) or the current time.
@@ -139,17 +155,17 @@ class CompilationOfCallbacks(Callback):
         print("In %s ...\n" % filepath)
         return filepath
 
-    def saveRunArguments(self, filepath):
+    def save_run_arguments(self, filepath):
         '''
         Save the command-line arguments, along with the method defaults,
         used to parameterise this run.
         '''
         handle = open("%s/argparse.args" % filepath, "w")
-        for arg, val in self.args.__dict__.iteritems():
-            handle.write("%s: %s\n" % (arg, str(val)))
+        for arg, value in self.args.__dict__.iteritems():
+            handle.write("%s: %s\n" % (arg, str(value)))
         handle.close()
 
-    def checkpointParameters(self, epoch, logs, filepath, bleu, cur_val_bleu):
+    def checkpoint_parameters(self, epoch, logs, filepath, bleu, cur_val_bleu):
         '''
         We checkpoint the model parameters based on either PPLX reduction or
         BLEU score increase in the validation data. This is driven by the
@@ -161,9 +177,9 @@ class CompilationOfCallbacks(Callback):
         if self.save_best_only and self.params['do_validation']:
             cur_val_loss = logs.get('val_loss')
 
-            print("Epoch %d: | val loss %0.5f (best: %0.5f) bleu %0.2f (best %0.2f)"
-                  % (epoch, cur_val_loss, self.best_val_loss,
-                             cur_val_bleu, self.best_val_bleu))
+            logger.info("Epoch %d: | val loss %0.5f (best: %0.5f) bleu %0.2f \
+                        (best %0.2f)", epoch, cur_val_loss,
+                        self.best_val_loss, cur_val_bleu, self.best_val_bleu)
 
             self.val_loss.append(cur_val_loss)
             self.bleu.append(bleu)
@@ -177,47 +193,49 @@ class CompilationOfCallbacks(Callback):
 
         if self.args.stopping_loss == 'model':
             if cur_val_loss < self.best_val_loss:
-                if self.verbose > 0:
-                    print("Saving model because val loss decreased")
+                logger.debug("Saving model because val loss decreased")
                 self.model.save_weights(filepath, overwrite=True)
 
         elif self.args.stopping_loss == 'bleu':
             if cur_val_bleu > self.best_val_bleu:
-                if self.verbose > 0:
-                    print("Saving model because bleu increased")
+                logger.debug("Saving model because bleu increased")
                 self.model.save_weights(filepath, overwrite=True)
 
         elif self.save_best_only and not self.params['do_validation']:
-            warnings.warn("Can save best model only with validation data, skipping", RuntimeWarning)
+            logger.warn("Can save best model only with val data, skipping")
+            warnings.warn("Can save best model only with val data, skipping",
+                          RuntimeWarning)
 
         elif not self.save_best_only:
             if self.verbose > 0:
-                print("Epoch %d: saving model")
+                logger.debug("Epoch %d: saving model", epoch)
             self.model.save_weights(filepath, overwrite=True)
 
-    def generateSentences(self, filepath, val=True):
+    def generate_sentences(self, filepath, val=True):
+        """ XXX WARNING stella: I've removed split and features here, replaced
+        with hdf5 dataset, but I haven't understood this method.
+        Also: dataset descriptions do not have BOS/EOS padding.
+        """
         prefix = "val" if val else "train"
-        print("Generating %s sentences from this model\n" % (prefix))
+        logger.info("Generating %s sentences from this model\n", prefix)
         handle = open("%s/%sGenerated" % (filepath, prefix), "w")
 
         # Generating image descriptions involves create a
         # sentence vector with the <S> symbol
         if val:
-            vggOffset = len(self.split['train'])
-            start = 0
-            end = len(self.split['val'])
+            offset = 0
         else:
-            vggOffset = 3000
-            start = 3000
-            end = 4000
+            offset = 3000
 
-        vggindex = 0
-        complete_sentences = []
-
-        complete_sentences = [["<S>"] for a in range(1000)]
-        vfeats = np.zeros((1000, 10+1, 4096))
+        complete_sentences = [["<S>"] for _ in range(1000)]
+        vfeats = np.zeros((1000, 10+1, IMG_FEATS))
         for i in range(1000):
-            vfeats[i,0] = self.features[:,vggOffset+i]
+            # scf: I am kind of guessing here (replacing feats)
+            data_key = "%04d" % (offset + i)
+            if val:
+                vfeats[i,0] = self.dataset['val'][data_key]['img_feats'][:]
+            else:
+                vfeats[i,0] = self.dataset['train'][data_key]['img_feats'][:]
         sents = np.zeros((1000, 10+1, len(self.word2index)))
         for t in range(10):
             preds = self.model.predict([sents, vfeats], verbose=0)
@@ -231,8 +249,8 @@ class CompilationOfCallbacks(Callback):
         sys.stdout.flush()
 
         for s in complete_sentences:
-            handle.write(' '.join([x for x in
-                                   itertools.takewhile(lambda n: n != "<E>",
-                                                       s[1:])]) + "\n")
+            handle.write(' '.join([x for x
+                                   in itertools.takewhile(
+                                       lambda n: n != "<E>", s[1:])]) + "\n")
 
         handle.close()

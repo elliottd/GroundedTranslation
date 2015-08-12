@@ -20,7 +20,7 @@ from collections import defaultdict
 # import shutil # unused
 import cPickle
 
-from ptbtokenizer import PTBTokenizer
+# from ptbtokenizer import PTBTokenizer  # unused
 from Callbacks import CompilationOfCallbacks
 import models
 
@@ -36,7 +36,7 @@ class VisualWordLSTM(object):
         self.vocab = dict()
         self.unkdict = dict()
         self.counter = 0
-        self.tokenizer = PTBTokenizer()
+        # self.tokenizer = PTBTokenizer()
         self.max_seq_len = 0
 
         if self.args.debug:
