@@ -133,7 +133,7 @@ class VisualWordDataGenerator(object):
                     batch_max_seq_len = len(description.split())
                 dscrp_array[batch_index, :, :] = self.format_sequence(
                     description.split())
-                img_array[batch_index, :, :] = self.get_image_features(
+                img_array[batch_index, 0, :] = self.get_image_features(
                     'train', data_key)
                 num_descriptions += 1
 
@@ -169,7 +169,7 @@ class VisualWordDataGenerator(object):
             for description in ds:
                 dscrp_array[d_idx, :, :] = self.format_sequence(
                     description.split())
-                img_array[d_idx, :, :] = self.get_image_features(
+                img_array[d_idx, 0, :] = self.get_image_features(
                     split, data_key)
                 d_idx += 1
                 if d_idx >= split_size:
