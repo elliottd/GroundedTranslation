@@ -58,20 +58,21 @@ class VisualWordLSTM(object):
                 for trainX, trainIX, trainY in\
                     self.data_generator.yield_training_batch():
                     logger.info("Big-batch %d", batch)
-                    if not batch:  # first batch
+                    if batch == 0:  # last batch
                         model.fit([trainX, trainIX],
                                   trainY,
                                   validation_data=([valX, valIX], valY),
                                   nb_epoch=1,
                                   callbacks=[callbacks],
                                   verbose=1,
+                                  batch_size=self.args.batch_size,
                                   shuffle=True)
                     else:  # no callbacks # TODO: no validation?
                         model.fit([trainX, trainIX],
                                   trainY,
-                                  validation_data=([valX, valIX], valY),
                                   nb_epoch=1,
                                   verbose=1,
+                                  batch_size=self.args.batch_size,
                                   shuffle=True)
                     batch += 1
 
