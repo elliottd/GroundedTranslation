@@ -24,7 +24,6 @@ PAD = "<P>"  # index 0
 # Dimensionality of image feature vector
 IMG_FEATS = 4096
 
-
 class VisualWordDataGenerator(object):
     """
     Creates input arrays for VisualWordLSTM and deals with input dataset in
@@ -58,11 +57,21 @@ class VisualWordDataGenerator(object):
             logger.warn("--small: Truncating datasets!")
         self.run_string = args_dict.run_string
 
+        # self.datasets holds 1+ datasets, where additional datasets will
+        # be used for supertraining the model
+        self.datasets = []
         if not input_dataset:
             logger.warn("No dataset given, using flickr8k")
-            self.dataset = h5py.File("flickr8k/flickr8k.h5", "r")
+            self.dataset = h5py.File("flickr8k/dataset.h5", "r")
         else:
-            self.dataset = h5py.File(input_dataset, "r")
+            self.dataset = h5py.File("%s/dataset.h5" % input_dataset, "r")
+        logger.info("Train/val dataset: %s", input_dataset)
+        self.datasets.append(self.dataset)
+
+        if args_dict.supertrain_datasets != None:
+            for path in args_dict.supertrain_datasets:
+                logger.info("Adding supertrain datasets: %s", path)
+                self.datasets.append(h5py.File("%s/dataset.h5" % path, "r"))
 
         # These variables are filled by extract_vocabulary
         self.word2index = dict()
@@ -101,45 +110,46 @@ class VisualWordDataGenerator(object):
 
         num_descriptions = 0  # indexing descriptions found so far
         batch_max_seq_len = 0
-        # Iterate over *images* in training split
-        for data_key in self.dataset['train']:
-            ds = self.dataset['train'][data_key]['descriptions']
-            for description in ds:
-                batch_index = num_descriptions % self.big_batch_size
-                # Return (filled0 big_batch array
-                if (batch_index == 0) and (num_descriptions > 0):
-                    # Truncate descriptions to max length of batch (plus
-                    # 3, for padding and safety)
-                    dscrp_array = dscrp_array[:, :(batch_max_seq_len + 3), :]
-                    img_array = img_array[:, :(batch_max_seq_len + 3), :]
-                    targets = self.get_target_descriptions(dscrp_array)
-                    yield (dscrp_array, img_array, targets)
-                    # Testing multiple big batches
-                    if self.small and num_descriptions > 3000:
-                        logger.warn("Breaking out of yield_training_batch")
-                        break
-                    dscrp_array = np.zeros((self.big_batch_size,
-                                            self.max_seq_len,
-                                            len(self.word2index)))
-                    img_array = np.zeros((self.big_batch_size,
-                                          self.max_seq_len, IMG_FEATS))
-
-                # Breaking out of nested loop (braindead)
-                # TODO: replace this with an exception
-                if self.small and num_descriptions > 3000:
-                    break
-
-                if len(description.split()) > batch_max_seq_len:
-                    batch_max_seq_len = len(description.split())
-                dscrp_array[batch_index, :, :] = self.format_sequence(
-                    description.split())
-                img_array[batch_index, 0, :] = self.get_image_features(
-                    'train', data_key)
-                num_descriptions += 1
-
-            # Breaking out of nested loop (braindead)
-            if self.small and num_descriptions > 3000:
-                break
+        # Iterate over *images* in training splits
+        for dataset in self.datasets:
+            for data_key in dataset['train']:
+               ds = dataset['train'][data_key]['descriptions']
+               for description in ds:
+                   batch_index = num_descriptions % self.big_batch_size
+                   # Return (filled0 big_batch array
+                   if (batch_index == 0) and (num_descriptions > 0):
+                       # Truncate descriptions to max length of batch (plus
+                       # 3, for padding and safety)
+                       dscrp_array = dscrp_array[:, :(batch_max_seq_len + 3), :]
+                       img_array = img_array[:, :(batch_max_seq_len + 3), :]
+                       targets = self.get_target_descriptions(dscrp_array)
+                       yield (dscrp_array, img_array, targets)
+                       # Testing multiple big batches
+                       if self.small and num_descriptions > 3000:
+                           logger.warn("Breaking out of yield_training_batch")
+                           break
+                       dscrp_array = np.zeros((self.big_batch_size,
+                                               self.max_seq_len,
+                                               len(self.word2index)))
+                       img_array = np.zeros((self.big_batch_size,
+                                             self.max_seq_len, IMG_FEATS))
+    
+                   # Breaking out of nested loop (braindead)
+                   # TODO: replace this with an exception
+                   if self.small and num_descriptions > 3000:
+                       break
+    
+                   if len(description.split()) > batch_max_seq_len:
+                       batch_max_seq_len = len(description.split())
+                   dscrp_array[batch_index, :, :] = self.format_sequence(
+                       description.split())
+                   img_array[batch_index, 0, :] = self.get_image_features(
+                       dataset, 'train', data_key)
+                   num_descriptions += 1
+    
+               # Breaking out of nested loop (braindead)
+               if self.small and num_descriptions > 3000:
+                   break
 
     def get_data_by_split(self, split):
         """ Gets all input data for model for a given split (ie. train, val,
@@ -154,6 +164,9 @@ class VisualWordDataGenerator(object):
         """
 
         logger.info("Making data for %s", split)
+        if len(self.datasets) > 1 and split == "train":
+            logger.warn("Called get_data_by_split on train while supertraining;\
+                        this is probably NOT WHAT YOU INTENDED")
 
         split_size = self.split_sizes[split]
         if self.small:
@@ -169,7 +182,7 @@ class VisualWordDataGenerator(object):
             for description in ds:
                 dscrp_array[d_idx, :, :] = self.format_sequence(
                     description.split())
-                img_array[d_idx, 0, :] = self.get_image_features(
+                img_array[d_idx, 0, :] = self.get_image_features(self.dataset,
                     split, data_key)
                 d_idx += 1
                 if d_idx >= split_size:
@@ -202,9 +215,9 @@ class VisualWordDataGenerator(object):
             img_array[idx, 0, :] = self.get_image_features(split, data_key)
         return img_array
 
-    def get_image_features(self, split, data_key):
+    def get_image_features(self, dataset, split, data_key):
         """ Return image features vector for split[data_key]."""
-        return self.dataset[split][data_key]['img_feats'][:]
+        return dataset[split][data_key]['img_feats'][:]
 
     def extract_vocabulary(self):
         '''
@@ -224,21 +237,22 @@ class VisualWordDataGenerator(object):
         unk_dict = defaultdict(int)
         longest_sentence = 0
 
-        for data_key in self.dataset['train']:
-            for description in self.dataset['train'][data_key]['descriptions']:
-                for token in description.split():
-                    unk_dict[token] += 1
-                if len(description.split()) > longest_sentence:
-                    longest_sentence = len(description.split())
-                self.split_sizes['train'] += 1
+        for dataset in self.datasets:
+            for data_key in dataset['train']:
+                for description in dataset['train'][data_key]['descriptions']:
+                    for token in description.split():
+                        unk_dict[token] += 1
+                    if len(description.split()) > longest_sentence:
+                        longest_sentence = len(description.split())
+                    self.split_sizes['train'] += 1
 
         # Also check val for longest sentence (but not vocabulary!)
         for data_key in self.dataset['val']:
             for description in self.dataset['val'][data_key]['descriptions']:
                 # TODO Comment out/delete these two lines because val data
                 # should not be in vocabulary.
-                for token in description.split():
-                    unk_dict[token] += 1
+                #for token in description.split():
+                #    unk_dict[token] += 1
                 if len(description.split()) > longest_sentence:
                     longest_sentence = len(description.split())
                 self.split_sizes['val'] += 1

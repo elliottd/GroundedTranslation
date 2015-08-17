@@ -39,11 +39,9 @@ class CompilationOfCallbacks(Callback):
         self.best_val_loss = np.inf
         self.val_loss.append(self.best_val_loss)
 
-        self.bleu = []
         self.val_bleu = []
         self.best_val_bleu = np.NINF
         self.best_bleu = np.NINF
-        self.bleu.append(self.best_val_bleu)
         self.val_bleu.append(self.best_val_bleu)
 
         self.word2index = word2index
@@ -54,9 +52,9 @@ class CompilationOfCallbacks(Callback):
         # data_generator)
         if not dataset:
             logger.warn("No dataset given, using flickr8k")
-            self.dataset = h5py.File("flickr8k/flickr8k.h5", "r")
+            self.dataset = h5py.File("flickr8k/dataset.h5", "r")
         else:
-            self.dataset = h5py.File(dataset, "r")
+            self.dataset = h5py.File("%s/dataset.h5" % dataset, "r")
 
     def on_epoch_end(self, epoch, logs={}):
         '''
@@ -72,18 +70,22 @@ class CompilationOfCallbacks(Callback):
         self.save_run_arguments(path)
 
         # Generate training and val sentences to check for overfitting
-        self.generate_sentences(path, val=False)
-        bleu = self.__bleu_score__(path, val=False)
+        #self.generate_sentences(path, val=False)
+        #bleu = self.__bleu_score__(path, val=False)
         self.generate_sentences(path)
         val_bleu = self.__bleu_score__(path)
 
-        self.checkpoint_parameters(epoch, logs, path, bleu, val_bleu)
+        self.checkpoint_parameters(epoch, logs, path, val_bleu)
 
     def on_train_end(self, logs={}):
         logger.info("Training complete")
-        for epoch in range(len(self.val_loss)):
+        for epoch in range(len(self.val_loss[1:])):
             print("Epoch %d | val loss: %.5f bleu %.2f"
                   % (epoch, self.val_loss[epoch], self.val_bleu[epoch]))
+
+        best = np.nanargmax(self.val_bleu[1:])
+        print("Best epoch: %d | val loss %.5f bleu %.2f" % (best,
+              self.val_loss[best], self.val_bleu[best]))
 
     def extract_references(self, directory, val=True):
         """
@@ -165,7 +167,7 @@ class CompilationOfCallbacks(Callback):
             handle.write("%s: %s\n" % (arg, str(value)))
         handle.close()
 
-    def checkpoint_parameters(self, epoch, logs, filepath, bleu, cur_val_bleu):
+    def checkpoint_parameters(self, epoch, logs, filepath, cur_val_bleu):
         '''
         We checkpoint the model parameters based on either PPLX reduction or
         BLEU score increase in the validation data. This is driven by the
@@ -177,12 +179,11 @@ class CompilationOfCallbacks(Callback):
         if self.save_best_only and self.params['do_validation']:
             cur_val_loss = logs.get('val_loss')
 
-            logger.info("Epoch %d: | val loss %0.5f (best: %0.5f) bleu %0.2f \
+            logger.info("Epoch %d: | val loss %0.5f (best: %0.5f) bleu %0.2f\
                         (best %0.2f)", epoch, cur_val_loss,
                         self.best_val_loss, cur_val_bleu, self.best_val_bleu)
 
             self.val_loss.append(cur_val_loss)
-            self.bleu.append(bleu)
             self.val_bleu.append(cur_val_bleu)
 
         # update the best values, if applicable

@@ -6,6 +6,7 @@ from __future__ import print_function
 
 import argparse
 import logging
+import math
 
 from Callbacks import CompilationOfCallbacks
 from data_generator import VisualWordDataGenerator
@@ -51,6 +52,9 @@ class VisualWordLSTM(object):
                                            self.args.dataset)
 
         if self.args.big_batch_size > 0:
+            exp_batches = int(math.ceil(self.data_generator.split_sizes['train']/
+                              self.args.big_batch_size))
+            val_check_batch = int(math.floor(exp_batches/4))
             # if we are doing big batches, the main loop ends up here
             for epoch in range(self.args.epochs):
                 logger.info("Epoch %d", epoch)
@@ -58,7 +62,8 @@ class VisualWordLSTM(object):
                 for trainX, trainIX, trainY in\
                     self.data_generator.yield_training_batch():
                     logger.info("Big-batch %d", batch)
-                    if batch == 0:  # last batch
+                    if batch % val_check_batch == 0:
+                        # let's test on the val after training on these batches
                         model.fit([trainX, trainIX],
                                   trainY,
                                   validation_data=([valX, valIX], valY),
@@ -71,7 +76,7 @@ class VisualWordLSTM(object):
                         model.fit([trainX, trainIX],
                                   trainY,
                                   nb_epoch=1,
-                                  verbose=1,
+                                  verbose=0,
                                   batch_size=self.args.batch_size,
                                   shuffle=True)
                     batch += 1
@@ -103,8 +108,13 @@ if __name__ == "__main__":
     parser.add_argument("--num_sents", default=5, type=int,
         help="Number of descriptions per image to use for training")
 
-    parser.add_argument("--dataset", default="", type=str, help="Name of HDF5\
-                        dataset to use as input (defaults to flickr8k)")
+    parser.add_argument("--dataset", default="", type=str, help="Path to the\
+                        HDF5 dataset to use for training / val input\
+                        (defaults to flickr8k)")
+
+    parser.add_argument("--supertrain_datasets", nargs="+", help="Paths to the\
+                        datasets to use as additional training input (defaults\
+                        to None)")
 
     parser.add_argument("--big_batch_size", default=0, type=int,
                         help="Number of examples to load from disk at a time;\
