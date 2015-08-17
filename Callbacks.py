@@ -80,11 +80,11 @@ class CompilationOfCallbacks(Callback):
     def on_train_end(self, logs={}):
         logger.info("Training complete")
         for epoch in range(len(self.val_loss[1:])):
-            print("Epoch %d | val loss: %.5f bleu %.2f"
+            print("Checkpoint %d | val loss: %.5f bleu %.2f"
                   % (epoch, self.val_loss[epoch], self.val_bleu[epoch]))
 
         best = np.nanargmax(self.val_bleu[1:])
-        print("Best epoch: %d | val loss %.5f bleu %.2f" % (best,
+        print("Best checkpoint: %d | val loss %.5f bleu %.2f" % (best,
               self.val_loss[best], self.val_bleu[best]))
 
     def extract_references(self, directory, val=True):
@@ -142,7 +142,7 @@ class CompilationOfCallbacks(Callback):
         '''
 
         prefix = self.args.run_string if self.args.run_string != "" else ""
-        filepath = "checkpoints/%s/epoch%03d-%s" % ((prefix, epoch, savetime))
+        filepath = "checkpoints/%s/%03d-%s" % ((prefix, epoch, savetime))
         try:
             os.mkdir("checkpoints/%s/" % (prefix))
             shutil.copyfile("train.py", "checkpoints/%s/train.py" % prefix)
@@ -150,8 +150,8 @@ class CompilationOfCallbacks(Callback):
         except OSError:
             pass  # directory already exists
         try:
-            os.mkdir("checkpoints/%s/epoch%03d-%s" % ((prefix, epoch,
-                                                       savetime)))
+            os.mkdir("checkpoints/%s/%03d-%s" % ((prefix, epoch,
+                                                     savetime)))
         except OSError:
             pass  # directory already exists
         print("In %s ...\n" % filepath)
@@ -179,8 +179,8 @@ class CompilationOfCallbacks(Callback):
         if self.save_best_only and self.params['do_validation']:
             cur_val_loss = logs.get('val_loss')
 
-            logger.info("Epoch %d: | val loss %0.5f (best: %0.5f) bleu %0.2f\
-                        (best %0.2f)", epoch, cur_val_loss,
+            logger.info("Checkpoint %d: | val loss %0.5f (best: %0.5f) bleu\
+                         %0.2f (best %0.2f)", epoch, cur_val_loss,
                         self.best_val_loss, cur_val_bleu, self.best_val_bleu)
 
             self.val_loss.append(cur_val_loss)
@@ -209,7 +209,7 @@ class CompilationOfCallbacks(Callback):
 
         elif not self.save_best_only:
             if self.verbose > 0:
-                logger.debug("Epoch %d: saving model", epoch)
+                logger.debug("Checkpoint %d: saving model", epoch)
             self.model.save_weights(filepath, overwrite=True)
 
     def generate_sentences(self, filepath, val=True):
