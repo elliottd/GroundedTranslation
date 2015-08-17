@@ -54,15 +54,15 @@ class VisualWordLSTM(object):
         if self.args.big_batch_size > 0:
             exp_batches = int(math.ceil(self.data_generator.split_sizes['train']/
                               self.args.big_batch_size))
-            val_check_batch = int(math.floor(exp_batches/4))
+            val_check_batch = int(math.floor(exp_batches * 
+                                             (self.args.checkpointing/100)))
             # if we are doing big batches, the main loop ends up here
             for epoch in range(self.args.epochs):
-                logger.info("Epoch %d", epoch)
                 batch = 0
                 for trainX, trainIX, trainY in\
                     self.data_generator.yield_training_batch():
-                    logger.info("Big-batch %d", batch)
-                    if batch % val_check_batch == 0:
+                    logger.info("Epoch %d, big-batch %d", epoch, batch)
+                    if batch % val_check_batch == 0 and batch != 0:
                         # let's test on the val after training on these batches
                         model.fit([trainX, trainIX],
                                   trainY,
@@ -111,7 +111,6 @@ if __name__ == "__main__":
     parser.add_argument("--dataset", default="", type=str, help="Path to the\
                         HDF5 dataset to use for training / val input\
                         (defaults to flickr8k)")
-
     parser.add_argument("--supertrain_datasets", nargs="+", help="Paths to the\
                         datasets to use as additional training input (defaults\
                         to None)")
@@ -132,6 +131,11 @@ if __name__ == "__main__":
                         help="Optimiser: rmsprop, momentum, adagrad, etc.")
     parser.add_argument("--stopping_loss", default="bleu", type=str,
                         help="minimise cross-entropy or maximise BLEU?")
+    parser.add_argument("--checkpointing", default=100, type=int, 
+                        help="regularity of checkpointing model parameters,\
+                              as a percentage of the training data size\
+                              (dataset + supertrain_datasets). (defaults to\
+                              only checkpointing at the end of each epoch)")
     parser.add_argument("--l2reg", default=1e-8, type=float,
                         help="L2 cost penalty. Default=1e-8")
 
