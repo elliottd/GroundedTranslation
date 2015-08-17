@@ -61,7 +61,8 @@ class VisualWordLSTM(object):
                 batch = 0
                 for trainX, trainIX, trainY in\
                     self.data_generator.yield_training_batch():
-                    logger.info("Epoch %d, big-batch %d", epoch, batch)
+                    logger.info("Epoch %d/%d, big-batch %d/%d", epoch, 
+                                self.args.epochs batch, exp_batches)
                     if batch % val_check_batch == 0 and batch != 0:
                         # let's test on the val after training on these batches
                         model.fit([trainX, trainIX],
