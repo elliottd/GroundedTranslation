@@ -6,7 +6,7 @@ from __future__ import print_function
 
 import argparse
 import logging
-import math
+from math import floor
 
 from Callbacks import CompilationOfCallbacks
 from data_generator import VisualWordDataGenerator
@@ -52,18 +52,19 @@ class VisualWordLSTM(object):
                                            self.args.dataset)
 
         if self.args.big_batch_size > 0:
-            exp_batches = int(math.ceil(self.data_generator.split_sizes['train']/
-                              self.args.big_batch_size))
-            val_check_batch = int(math.floor(exp_batches * 
-                                             (self.args.checkpointing/100)))
-            # if we are doing big batches, the main loop ends up here
+            exp_batches = int(floor(self.data_generator.split_sizes['train']/
+                             self.args.big_batch_size))
+            val_check_batch = int(floor(exp_batches * 
+                                             (self.args.checkpointing/100)))-1
+            print(exp_batches)
+            print(val_check_batch)
             for epoch in range(self.args.epochs):
-                batch = 0
+                batch = 1
                 for trainX, trainIX, trainY in\
                     self.data_generator.yield_training_batch():
                     logger.info("Epoch %d/%d, big-batch %d/%d", epoch, 
-                                self.args.epochs batch, exp_batches)
-                    if batch % val_check_batch == 0 and batch != 0:
+                                self.args.epochs, batch, exp_batches)
+                    if batch % val_check_batch == 0:
                         # let's test on the val after training on these batches
                         model.fit([trainX, trainIX],
                                   trainY,
@@ -77,23 +78,10 @@ class VisualWordLSTM(object):
                         model.fit([trainX, trainIX],
                                   trainY,
                                   nb_epoch=1,
-                                  verbose=0,
+                                  verbose=1,
                                   batch_size=self.args.batch_size,
                                   shuffle=True)
                     batch += 1
-
-        else:
-            # Train model on full dataset all at once, as usual.
-            trainX, trainIX, trainY = self.data_generator.get_data_by_split('train')
-            # pylint: disable=invalid-name
-            model.fit([trainX, trainIX],
-                      trainY,
-                      batch_size=self.args.batch_size,
-                      validation_data=([valX, valIX], valY),
-                      nb_epoch=self.args.epochs,
-                      callbacks=[callbacks],
-                      verbose=1,
-                      shuffle=True)
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(
@@ -116,7 +104,7 @@ if __name__ == "__main__":
                         datasets to use as additional training input (defaults\
                         to None)")
 
-    parser.add_argument("--big_batch_size", default=0, type=int,
+    parser.add_argument("--big_batch_size", default=1000, type=int,
                         help="Number of examples to load from disk at a time;\
                         0 (default) loads entire dataset")
 
