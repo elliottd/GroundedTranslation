@@ -286,7 +286,7 @@ class VisualWordDataGenerator(object):
 
         logger.info("Split sizes %s", self.split_sizes)
 
-        logger.info("Number of words %d", len(self.word2index))
+        logger.info("Number of words %d -> %d", len(unk_dict), len(self.word2index))
         logger.debug("word2index %s", self.word2index.items())
         logger.debug("Number of indices %d", len(self.index2word))
         logger.debug("index2word: %s", self.index2word.items())
@@ -315,12 +315,14 @@ class VisualWordDataGenerator(object):
             self.actual_max_seq_len = len(w_indices)
 
         seq_array[0, self.word2index[BOS]] += 1  # BOS token at zero timestep
+        time = 0
         for time, vocab in enumerate(w_indices):
             seq_array[time + 1, vocab] += 1
         # add EOS token at end of sentence
         assert time + 1 == len(w_indices),\
-                "time %d len w_indices %d seq_array %s" % (
-                    time, len(w_indices), seq_array)
+                "time %d sequence %s len w_indices %d seq_array %s" % (
+                    time, " ".join([x for x in sequence]), len(w_indices), 
+                    seq_array)
         seq_array[len(w_indices) + 1, self.word2index[EOS]] += 1
         return seq_array
 
