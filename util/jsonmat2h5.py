@@ -11,8 +11,6 @@ parser.add_argument("--path", type=str, help="Path to .mat and .json file",
                     default="flickr8k")
 args = parser.parse_args()
 
-NUM_DESCRIPTIONS = 5  # Descriptions per image
-
 jdata = json.load(open("%s/dataset.json" % args.path))
 print("Loaded JSON file with %d entries" % len(jdata['images']))
 features_struct = scipy.io.loadmat('%s/vgg_feats.mat' % args.path)['feats']
@@ -55,7 +53,7 @@ for idx, image in enumerate(jdata['images']):
     test_counter += 1
 
   # The descriptions "Dataset" contains one row per description in unicode
-  text_data = container.create_dataset("descriptions", (NUM_DESCRIPTIONS,),
+  text_data = container.create_dataset("descriptions", (len(image['sentences']),),
                                        dtype=h5py.special_dtype(vlen=unicode))
 
   # The visual features "Dataset" contains one vector array per image in float32
@@ -65,7 +63,7 @@ for idx, image in enumerate(jdata['images']):
                                         # (NUM_DESCRIPTIONS, 4096), dtype='float32')
   image_data[:] = features_struct[:, idx]
 
-  for idx2, text in enumerate(image['sentences'][0:5]):
+  for idx2, text in enumerate(image['sentences']):
     text_data[idx2] = " ".join(text['tokens']) #['raw']
     #image_data[idx2] = features_struct[:,idx]
 
