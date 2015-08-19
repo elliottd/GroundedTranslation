@@ -11,6 +11,7 @@ import numpy as np
 import os
 import subprocess
 import shutil
+import codecs
 import sys
 from time import gmtime, strftime
 
@@ -33,16 +34,11 @@ class CompilationOfCallbacks(Callback):
         self.filename = "weights.hdf5"
         self.save_best_only = True
 
-        self.loss = []
-        self.best_loss = np.inf
         self.val_loss = []
         self.best_val_loss = np.inf
-        self.val_loss.append(self.best_val_loss)
 
         self.val_bleu = []
         self.best_val_bleu = np.NINF
-        self.best_bleu = np.NINF
-        self.val_bleu.append(self.best_val_bleu)
 
         self.word2index = word2index
         self.index2word = index2word
@@ -79,11 +75,11 @@ class CompilationOfCallbacks(Callback):
 
     def on_train_end(self, logs={}):
         logger.info("Training complete")
-        for epoch in range(len(self.val_loss[1:])):
+        for epoch in range(len(self.val_loss)):
             print("Checkpoint %d | val loss: %.5f bleu %.2f"
                   % (epoch, self.val_loss[epoch], self.val_bleu[epoch]))
 
-        best = np.nanargmax(self.val_bleu[1:])
+        best = np.nanargmax(self.val_bleu)
         print("Best checkpoint: %d | val loss %.5f bleu %.2f" % (best,
               self.val_loss[best], self.val_bleu[best]))
 
@@ -108,9 +104,9 @@ class CompilationOfCallbacks(Callback):
                 references.append(this_image)
 
         for refid in xrange(len(references[0])):
-            open('%s/%s_reference.ref%d' % (directory, "val" if val
+            codecs.open('%s/%s_reference.ref%d' % (directory, "val" if val
                                             else "train", refid),
-                 'w').write('\n'.join([x[refid] for x in references]))
+                 'w', 'iso-8859-16').write('\n'.join([x[refid] for x in references]))
 
     def __bleu_score__(self, directory, val=True):
         '''
@@ -186,12 +182,6 @@ class CompilationOfCallbacks(Callback):
             self.val_loss.append(cur_val_loss)
             self.val_bleu.append(cur_val_bleu)
 
-        # update the best values, if applicable
-        if cur_val_loss < self.best_val_loss:
-            self.best_val_loss = cur_val_loss
-        if cur_val_bleu > self.best_val_bleu:
-            self.best_val_bleu = cur_val_bleu
-
         if self.args.stopping_loss == 'model':
             if cur_val_loss < self.best_val_loss:
                 logger.debug("Saving model because val loss decreased")
@@ -212,6 +202,12 @@ class CompilationOfCallbacks(Callback):
                 logger.debug("Checkpoint %d: saving model", epoch)
             self.model.save_weights(filepath, overwrite=True)
 
+        # update the best values, if applicable
+        if cur_val_loss < self.best_val_loss:
+            self.best_val_loss = cur_val_loss
+        if cur_val_bleu > self.best_val_bleu:
+            self.best_val_bleu = cur_val_bleu
+
     def generate_sentences(self, filepath, val=True):
         """ XXX WARNING stella: I've removed split and features here, replaced
         with hdf5 dataset, but I haven't understood this method.
@@ -219,7 +215,8 @@ class CompilationOfCallbacks(Callback):
         """
         prefix = "val" if val else "train"
         logger.info("Generating %s sentences from this model\n", prefix)
-        handle = open("%s/%sGenerated" % (filepath, prefix), "w")
+        handle = codecs.open("%s/%sGenerated" % (filepath, prefix), "w", 
+                             'iso-8859-16')
 
         # Generating image descriptions involves create a
         # sentence vector with the <S> symbol
@@ -232,7 +229,7 @@ class CompilationOfCallbacks(Callback):
         vfeats = np.zeros((1000, 10+1, IMG_FEATS))
         for i in range(1000):
             # scf: I am kind of guessing here (replacing feats)
-            data_key = "%04d" % (offset + i)
+            data_key = "%06d" % (offset + i)
             if val:
                 vfeats[i,0] = self.dataset['val'][data_key]['img_feats'][:]
             else:
