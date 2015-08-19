@@ -225,20 +225,20 @@ class CompilationOfCallbacks(Callback):
         else:
             offset = 3000
 
-        complete_sentences = [["<S>"] for _ in range(1000)]
-        vfeats = np.zeros((1000, 10+1, IMG_FEATS))
-        for i in range(1000):
+        complete_sentences = [["<S>"] for _ in self.dataset['val']]
+        vfeats = np.zeros((len(self.dataset['val']), 10+1, IMG_FEATS))
+        for i in range(len(self.dataset['val'])):
             # scf: I am kind of guessing here (replacing feats)
             data_key = "%06d" % (offset + i)
             if val:
                 vfeats[i,0] = self.dataset['val'][data_key]['img_feats'][:]
             else:
                 vfeats[i,0] = self.dataset['train'][data_key]['img_feats'][:]
-        sents = np.zeros((1000, 10+1, len(self.word2index)))
+        sents = np.zeros((len(self.dataset['val']), 10+1, len(self.word2index)))
         for t in range(10):
             preds = self.model.predict([sents, vfeats], verbose=0)
             next_word_indices = np.argmax(preds[:,t], axis=1)
-            for i in range(1000):
+            for i in range(len(self.dataset['val'])):
                 sents[i, t+1, next_word_indices[i]] = 1.
             next_words = [self.index2word[x] for x in next_word_indices]
             for i in range(len(next_words)):
