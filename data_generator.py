@@ -44,6 +44,7 @@ class VisualWordDataGenerator(object):
         If dataset is not given, use flickr8k.h5.
         """
         logger.info("Initialising data generator")
+        self.args_dict = args_dict
 
         # size of chucks that the generator should return;
         # if None returns full dataset at once.
@@ -66,12 +67,12 @@ class VisualWordDataGenerator(object):
         else:
             self.dataset = h5py.File("%s/dataset.h5" % input_dataset, "r")
         logger.info("Train/val dataset: %s", input_dataset)
-        self.datasets.append(self.dataset)
 
         if args_dict.supertrain_datasets != None:
             for path in args_dict.supertrain_datasets:
                 logger.info("Adding supertrain datasets: %s", path)
                 self.datasets.append(h5py.File("%s/dataset.h5" % path, "r"))
+        self.datasets.append(self.dataset)
 
         # These variables are filled by extract_vocabulary
         self.word2index = dict()
@@ -113,7 +114,7 @@ class VisualWordDataGenerator(object):
         # Iterate over *images* in training splits
         for dataset in self.datasets:
             for data_key in dataset['train']:
-               ds = dataset['train'][data_key]['descriptions']
+               ds = dataset['train'][data_key]['descriptions'][0:self.args_dict.num_sents]
                for description in ds:
                    batch_index = num_descriptions % self.big_batch_size
                    # Return (filled0 big_batch array
@@ -239,7 +240,7 @@ class VisualWordDataGenerator(object):
 
         for dataset in self.datasets:
             for data_key in dataset['train']:
-                for description in dataset['train'][data_key]['descriptions']:
+                for description in dataset['train'][data_key]['descriptions'][0:self.args_dict.num_sents]:
                     for token in description.split():
                         unk_dict[token] += 1
                     if len(description.split()) > longest_sentence:
