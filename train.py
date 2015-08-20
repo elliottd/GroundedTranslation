@@ -130,6 +130,9 @@ if __name__ == "__main__":
 
     parser.add_argument("--unk", type=int,
                         help="unknown character cut-off. Default=5", default=5)
+    parser.add_argument("--generate_timesteps", default=10, type=int, 
+                        help="Maximum number of words to generate for unseen\
+                        data (default=10).")
 
     model = VisualWordLSTM(parser.parse_args())
     model.train_model()
