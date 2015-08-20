@@ -6,7 +6,7 @@ from keras.layers.recurrent import LSTM
 from keras.regularizers import l2
 
 import math
-
+import shutil
 
 class TwoLayerLSTM:
 
@@ -63,6 +63,8 @@ class TwoLayerLSTM:
 
         if self.weights is not None:
             # Initialise the weights of the model
+            shutil.copyfile("%s/weights.hdf5" % self.weights, 
+                           "%s/weights.hdf5.bak" % self.weights)
             model.load_weights("%s/weights.hdf5" % self.weights)
 
         return model
