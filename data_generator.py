@@ -142,11 +142,14 @@ class VisualWordDataGenerator(object):
     
                    if len(description.split()) > batch_max_seq_len:
                        batch_max_seq_len = len(description.split())
-                   dscrp_array[batch_index, :, :] = self.format_sequence(
-                       description.split())
-                   img_array[batch_index, 0, :] = self.get_image_features(
-                       dataset, 'train', data_key)
-                   num_descriptions += 1
+                   try:
+                     dscrp_array[batch_index, :, :] = self.format_sequence(
+                         description.split())
+                     img_array[batch_index, 0, :] = self.get_image_features(
+                         dataset, 'train', data_key)
+                     num_descriptions += 1
+                   except AssertionError:
+                     continue
     
                # Breaking out of nested loop (braindead)
                if self.small and num_descriptions > 3000:

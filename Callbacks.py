@@ -202,6 +202,9 @@ class CompilationOfCallbacks(Callback):
                 logger.debug("Checkpoint %d: saving model", epoch)
             self.model.save_weights(filepath, overwrite=True)
 
+        # save the weights anyway for debug purposes
+        self.model.save_weights(filepath, overwrite=True)
+
         # update the best values, if applicable
         if cur_val_loss < self.best_val_loss:
             self.best_val_loss = cur_val_loss
