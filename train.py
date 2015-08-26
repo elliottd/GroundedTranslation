@@ -27,6 +27,7 @@ class VisualWordLSTM(object):
 
         self.data_generator = VisualWordDataGenerator(
             self.args, self.args.dataset)
+        self.data_generator.extract_vocabulary()
 
         self.V = self.data_generator.get_vocab_size()
 

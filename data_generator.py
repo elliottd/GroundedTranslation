@@ -86,8 +86,6 @@ class VisualWordDataGenerator(object):
         # This counts number of descriptions per split
         # Ignores test for now (change in extract_vocabulary)
         self.split_sizes = {'train': 0, 'val': 0, 'test': 0}
-        # Call this to fill word2index etc.
-        self.extract_vocabulary()
 
     def get_vocab_size(self):
         """Return training (currently also +val) vocabulary size."""
@@ -223,6 +221,48 @@ class VisualWordDataGenerator(object):
         """ Return image features vector for split[data_key]."""
         return dataset[split][data_key]['img_feats'][:]
 
+    def set_vocabulary(self, path):
+        '''
+        Initialise the vocabulary from a checkpointed model.
+
+        TODO: some duplication from extract_vocabulary
+        '''
+        logger.info("Initialising vocabulary from pre-defined model")
+        v = cPickle.load(open("%s/../vocabulary.pk" % path, "rb"))
+        self.index2word  = dict((v,k) for k,v in v.iteritems())
+        self.word2index  = dict((k,v) for k,v in v.iteritems())
+        longest_sentence = 0
+        # set the length of the longest sentence
+        train_longest = self.find_longest_sentence('train')
+        val_longest = self.find_longest_sentence('val')
+        longest_sentence = max(longest_sentence, train_longest, val_longest)
+        self.max_seq_len = longest_sentence + 2
+        logger.info("Max seq length %d, setting max_seq_len to %d",
+                    longest_sentence, self.max_seq_len)
+
+        logger.info("Split sizes %s", self.split_sizes)
+
+        logger.info("Number of words %d", len(self.word2index))
+        logger.debug("word2index %s", self.word2index.items())
+        logger.debug("Number of indices %d", len(self.index2word))
+        logger.debug("index2word: %s", self.index2word.items())
+
+    def find_longest_sentence(self, split):
+        '''
+        Calculcates the length of the longest sentence in a given split of
+        a dataset and updates the number of sentences in a split.
+        '''
+        longest_sentence = 0
+        for dataset in self.datasets:
+            for data_key in dataset[split]:
+                for description in dataset[split][data_key]['descriptions'][0:self.args_dict.num_sents]:
+                    d = description.split()
+                    if len(d) > longest_sentence:
+                        longest_sentence = len(d)
+                    self.split_sizes[split] += 1
+
+        return longest_sentence
+
     def extract_vocabulary(self):
         '''
         Collect word frequency counts over the train / val inputs and use
@@ -246,20 +286,11 @@ class VisualWordDataGenerator(object):
                 for description in dataset['train'][data_key]['descriptions'][0:self.args_dict.num_sents]:
                     for token in description.split():
                         unk_dict[token] += 1
-                    if len(description.split()) > longest_sentence:
-                        longest_sentence = len(description.split())
-                    self.split_sizes['train'] += 1
 
-        # Also check val for longest sentence (but not vocabulary!)
-        for data_key in self.dataset['val']:
-            for description in self.dataset['val'][data_key]['descriptions']:
-                # TODO Comment out/delete these two lines because val data
-                # should not be in vocabulary.
-                #for token in description.split():
-                #    unk_dict[token] += 1
-                if len(description.split()) > longest_sentence:
-                    longest_sentence = len(description.split())
-                self.split_sizes['val'] += 1
+        # set the length of the longest sentence
+        train_longest = self.find_longest_sentence('train')
+        val_longest = self.find_longest_sentence('val')
+        longest_sentence = max(longest_sentence, train_longest, val_longest)
 
         # vocabulary is a word:id dict (superceded by/identical to word2index?)
         # <S>, <E> are special first indices
