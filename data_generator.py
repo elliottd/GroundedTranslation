@@ -3,6 +3,7 @@ Data processing for VisualWordLSTM happens here; this creates a class that
 acts as a data generator/feed for model training.
 """
 from __future__ import print_function
+from keras.utils.theano_utils import floatX	
 
 from collections import defaultdict
 import cPickle
@@ -63,15 +64,15 @@ class VisualWordDataGenerator(object):
         self.datasets = []
         if not input_dataset:
             logger.warn("No dataset given, using flickr8k")
-            self.dataset = h5py.File("flickr8k/dataset.h5", "r")
+            self.dataset = h5py.File("flickr8k/dataset.h5", "r+")
         else:
-            self.dataset = h5py.File("%s/dataset.h5" % input_dataset, "r")
+            self.dataset = h5py.File("%s/dataset.h5" % input_dataset, "r+")
         logger.info("Train/val dataset: %s", input_dataset)
 
         if args_dict.supertrain_datasets != None:
             for path in args_dict.supertrain_datasets:
                 logger.info("Adding supertrain datasets: %s", path)
-                self.datasets.append(h5py.File("%s/dataset.h5" % path, "r"))
+                self.datasets.append(h5py.File("%s/dataset.h5" % path, "r+"))
         self.datasets.append(self.dataset)
 
         # These variables are filled by extract_vocabulary
@@ -109,6 +110,7 @@ class VisualWordDataGenerator(object):
 
         num_descriptions = 0  # indexing descriptions found so far
         batch_max_seq_len = 0
+        filled_counter = 0 # we resize the arrays for the final batch
         # Iterate over *images* in training splits
         for dataset in self.datasets:
             for data_key in dataset['train']:
@@ -132,6 +134,7 @@ class VisualWordDataGenerator(object):
                                                len(self.word2index)))
                        img_array = np.zeros((self.big_batch_size,
                                              self.max_seq_len, IMG_FEATS))
+                       filled_counter = 0
     
                    # Breaking out of nested loop (braindead)
                    # TODO: replace this with an exception
@@ -146,12 +149,36 @@ class VisualWordDataGenerator(object):
                      img_array[batch_index, 0, :] = self.get_image_features(
                          dataset, 'train', data_key)
                      num_descriptions += 1
+                     filled_counter += 1
                    except AssertionError:
                      continue
     
                # Breaking out of nested loop (braindead)
                if self.small and num_descriptions > 3000:
                    break
+
+            # batch_index is not guaranteed to modulo zero on the
+            # final big_batch. This if statement catches that and
+            # resizes the final yielded dscrp/img_array and targets
+            dscrp_array = np.resize(dscrp_array, (filled_counter,
+                                    self.max_seq_len,
+                                    len(self.word2index)))
+            img_array = np.resize(img_array, (filled_counter,
+                                  self.max_seq_len,
+                                  IMG_FEATS))
+            # Return (filled0 big_batch array
+            # Truncate descriptions to max length of batch (plus
+            # 3, for padding and safety)
+            dscrp_array = dscrp_array[:, :(batch_max_seq_len + 3), :]
+            img_array = img_array[:, :(batch_max_seq_len + 3), :]
+            targets = self.get_target_descriptions(dscrp_array)
+            yield (dscrp_array, img_array, targets)
+            dscrp_array = np.zeros((self.big_batch_size,
+                                    self.max_seq_len,
+                                    len(self.word2index)))
+            img_array = np.zeros((self.big_batch_size,
+                                  self.max_seq_len, IMG_FEATS))
+            filled_counter = 0
 
     def get_data_by_split(self, split):
         """ Gets all input data for model for a given split (ie. train, val,
