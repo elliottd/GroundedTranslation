@@ -59,20 +59,18 @@ class VisualWordLSTM:
 
     self.data_generator = VisualWordDataGenerator(self.args,
                                                   self.args.dataset)
+    self.data_generator.set_vocabulary(self.args.checkpoint)
+    self.vocab_len = len(self.data_generator.index2word)
+    self.index2word = self.data_generator.index2word
 
-    self.vocab = cPickle.load(open("%s/../vocabulary.pk" % self.args.checkpoint, "rb"))
-    self.index2word  = dict((v,k) for k,v in self.vocab.iteritems())
-    self.word2index  = dict((k,v) for k,v in self.vocab.iteritems())
-    self.data_generator.index2word = self.index2word
-    self.data_generator.word2index = self.word2index
-    X, IX, Y = self.data_generator.get_data_by_split("val")
+    X, IX, Y, S = self.data_generator.get_data_by_split("val")
 
-    m = models.TwoLayerLSTM(self.args.hidden_size, len(self.vocab),
+    m = models.TwoLayerLSTM(self.args.hidden_size, self.vocab_len,
                             self.args.dropin, self.args.droph,
                             self.args.optimiser, self.args.l2reg,
-                            weights=self.args.checkpoint)
-
-    self.model = m.buildKerasModel()
+                            weights=self.args.checkpoint,
+                            hsn = self.args.source_vectors != None)
+    self.model = m.buildKerasModel(hsn=self.args.source_vectors != None)
 
     self.generate_sentences(self.args.checkpoint)
     self.bleu_score(self.args.checkpoint)
@@ -109,6 +107,7 @@ class VisualWordLSTM:
         for idx,data_key in enumerate(self.dataset[prefix]):
             # vfeats at time=0 only to avoid overfitting
             vfeats[idx,0] = self.dataset[prefix][data_key]['img_feats'][:]
+            sents[idx,0,1] = 1 # 1 == BOS token
             if self.args.source_vectors != None:
                 source_feats[idx,0] = self.source_dataset[prefix][data_key]\
                                       ['final_hidden_features'][:]

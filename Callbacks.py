@@ -243,6 +243,7 @@ class CompilationOfCallbacks(Callback):
         for idx,data_key in enumerate(self.dataset[prefix]):
             # vfeats at time=0 only to avoid overfitting
             vfeats[idx,0] = self.dataset[prefix][data_key]['img_feats'][:]
+            sents[idx,0,1] = 1 # 1 == BOS token
             if self.args.source_vectors != None:
                 source_feats[idx,0] = self.source_dataset[prefix][data_key]\
                                       ['final_hidden_features'][:]
