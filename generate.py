@@ -28,6 +28,7 @@ logger = logging.getLogger(__name__)
 
 # Dimensionality of image feature vector
 IMG_FEATS = 4096
+HSN_SIZE = 409
 
 class VisualWordLSTM:
 
@@ -62,6 +63,7 @@ class VisualWordLSTM:
     self.data_generator.set_vocabulary(self.args.checkpoint)
     self.vocab_len = len(self.data_generator.index2word)
     self.index2word = self.data_generator.index2word
+    self.word2index = self.data_generator.word2index
 
     X, IX, Y, S = self.data_generator.get_data_by_split("val")
 
@@ -93,29 +95,29 @@ class VisualWordLSTM:
 
         # prepare the datastructures for generation
         sents = np.zeros((len(self.dataset[prefix]),
-                          self.args.generate_timesteps+1, 
-                          len(self.word2index)))
+                          self.args.generation_timesteps+1, 
+                          self.vocab_len))
         vfeats = np.zeros((len(self.dataset[prefix]), 
-                           self.args.generate_timesteps+1, 
+                           self.args.generation_timesteps+1, 
                            IMG_FEATS))
         if self.args.source_vectors != None:
           source_feats = np.zeros((len(self.dataset[prefix]), 
-                                   self.args.generate_timesteps+1, 
+                                   self.args.generation_timesteps+1, 
                                    HSN_SIZE))
 
         # populate the datastructures from the h5
         for idx,data_key in enumerate(self.dataset[prefix]):
             # vfeats at time=0 only to avoid overfitting
             vfeats[idx,0] = self.dataset[prefix][data_key]['img_feats'][:]
-            sents[idx,0,1] = 1 # 1 == BOS token
+            sents[idx,0,self.word2index["<S>"]] = 1 # 1 == BOS token
             if self.args.source_vectors != None:
-                source_feats[idx,0] = self.source_dataset[prefix][data_key]\
+                source_feats[idx,0] = self.data_generator.source_dataset[prefix][data_key]\
                                       ['final_hidden_features'][:]
 
         # holds the sentences as words instead of indices
         complete_sentences = [["<S>"] for _ in self.dataset[prefix]] 
 
-        for t in range(self.args.generate_timesteps):
+        for t in range(self.args.generation_timesteps):
             preds = self.model.predict([sents, source_feats, vfeats] if
                                         self.args.source_vectors != None 
                                         else [sents, vfeats], verbose=0)
