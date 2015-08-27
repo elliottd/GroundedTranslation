@@ -64,7 +64,7 @@ class CompilationOfCallbacks(Callback):
           5. decide whether to save the model parameters using BLEU
         '''
         savetime = strftime("%d%m%Y-%H%M%S", gmtime())
-        path = self.create_checkpoint_directory(epoch, savetime)
+        path = self.create_checkpoint_directory(savetime)
         self.save_run_arguments(path)
 
         # Generate training and val sentences to check for overfitting
@@ -131,14 +131,14 @@ class CompilationOfCallbacks(Callback):
         bleu = float(bleuscore.lstrip())
         return bleu
 
-    def create_checkpoint_directory(self, epoch, savetime):
+    def create_checkpoint_directory(self, savetime):
         '''
         We will create one directory to store all of the epochs data inside.
         The name is based on the run_string (if provided) or the current time.
         '''
 
         prefix = self.args.run_string if self.args.run_string != "" else ""
-        filepath = "checkpoints/%s/%03d-%s" % ((prefix, epoch, savetime))
+        filepath = "checkpoints/%s/%s" % ((prefix, savetime))
         try:
             os.mkdir("checkpoints/%s/" % (prefix))
             shutil.copyfile("train.py", "checkpoints/%s/train.py" % prefix)
@@ -146,8 +146,7 @@ class CompilationOfCallbacks(Callback):
         except OSError:
             pass  # directory already exists
         try:
-            os.mkdir("checkpoints/%s/%03d-%s" % ((prefix, epoch,
-                                                     savetime)))
+            os.mkdir("checkpoints/%s/%s" % ((prefix, savetime)))
         except OSError:
             pass  # directory already exists
         print("In %s ...\n" % filepath)
