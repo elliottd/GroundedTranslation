@@ -91,7 +91,7 @@ class VisualWordLSTM:
         prefix = "val" if val else "test"
         logger.info("Generating %s sentences from this model\n", prefix)
         handle = codecs.open("%s/%sGenerated" % (filepath, prefix), "w", 
-                             'iso-8859-16')
+                             'utf-8')
 
         # prepare the datastructures for generation
         sents = np.zeros((len(self.dataset[prefix]),
@@ -161,7 +161,7 @@ class VisualWordLSTM:
         for refid in xrange(len(references[0])):
             codecs.open('%s/%s_reference.ref%d' % (directory, "val" if val
                                             else "train", refid),
-                 'w', 'iso-8859-16').write('\n'.join([x[refid] for x in references]))
+                 'w', 'utf-8').write('\n'.join([x[refid] for x in references]))
 
   def bleu_score(self, directory):
     '''
