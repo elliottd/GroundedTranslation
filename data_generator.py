@@ -24,6 +24,7 @@ PAD = "<P>"  # index 0
 
 # Dimensionality of image feature vector
 IMG_FEATS = 4096
+HSN_SIZE = 409
 
 class VisualWordDataGenerator(object):
     """
@@ -75,6 +76,12 @@ class VisualWordDataGenerator(object):
                 self.datasets.append(h5py.File("%s/dataset.h5" % path, "r+"))
         self.datasets.append(self.dataset)
 
+        self.hsn = False
+        if self.args_dict.source_vectors != None:
+          self.source_dataset = h5py.File("%s/dataset.h5" % self.args_dict.source_vectors, "r")
+          self.hsn = True
+          print(self.get_hsn_features('train', '000214'))
+
         # These variables are filled by extract_vocabulary
         self.word2index = dict()
         self.index2word = dict()
@@ -107,6 +114,9 @@ class VisualWordDataGenerator(object):
         img_array = np.zeros((self.big_batch_size,
                               self.max_seq_len,
                               IMG_FEATS))
+        hsn_array = np.zeros((self.big_batch_size,
+                            self.max_seq_len,
+                            HSN_SIZE))
 
         num_descriptions = 0  # indexing descriptions found so far
         batch_max_seq_len = 0
@@ -123,8 +133,9 @@ class VisualWordDataGenerator(object):
                        # 3, for padding and safety)
                        dscrp_array = dscrp_array[:, :(batch_max_seq_len + 3), :]
                        img_array = img_array[:, :(batch_max_seq_len + 3), :]
+                       hsn_array = hsn_array[:, :(batch_max_seq_len + 3), :]
                        targets = self.get_target_descriptions(dscrp_array)
-                       yield (dscrp_array, img_array, targets)
+                       yield (dscrp_array, img_array, targets, hsn_array, filled_counter == self.split_sizes['train'])
                        # Testing multiple big batches
                        if self.small and num_descriptions > 3000:
                            logger.warn("Breaking out of yield_training_batch")
@@ -134,6 +145,9 @@ class VisualWordDataGenerator(object):
                                                len(self.word2index)))
                        img_array = np.zeros((self.big_batch_size,
                                              self.max_seq_len, IMG_FEATS))
+                       hsn_array = np.zeros((self.big_batch_size,
+                                            self.max_seq_len,
+                                            HSN_SIZE))
                        filled_counter = 0
     
                    # Breaking out of nested loop (braindead)
@@ -148,6 +162,8 @@ class VisualWordDataGenerator(object):
                          description.split())
                      img_array[batch_index, 0, :] = self.get_image_features(
                          dataset, 'train', data_key)
+                     if self.hsn:
+                       hsn_array[batch_index, 0, :] = self.get_hsn_features('train', data_key)
                      num_descriptions += 1
                      filled_counter += 1
                    except AssertionError:
@@ -166,18 +182,25 @@ class VisualWordDataGenerator(object):
             img_array = np.resize(img_array, (filled_counter,
                                   self.max_seq_len,
                                   IMG_FEATS))
+            hsn_array = np.resize(hsn_array, (filled_counter,
+                                  self.max_seq_len,
+                                  HSN_SIZE))
             # Return (filled0 big_batch array
             # Truncate descriptions to max length of batch (plus
             # 3, for padding and safety)
             dscrp_array = dscrp_array[:, :(batch_max_seq_len + 3), :]
             img_array = img_array[:, :(batch_max_seq_len + 3), :]
             targets = self.get_target_descriptions(dscrp_array)
-            yield (dscrp_array, img_array, targets)
+            hsn_array = hsn_array[:, :(batch_max_seq_len + 3), :]
+            yield (dscrp_array, img_array, targets, hsn_array, True)
             dscrp_array = np.zeros((self.big_batch_size,
                                     self.max_seq_len,
                                     len(self.word2index)))
             img_array = np.zeros((self.big_batch_size,
                                   self.max_seq_len, IMG_FEATS))
+            hsn_array = np.zeros((self.big_batch_size,
+                                 self.max_seq_len,
+                                 HSN_SIZE))
             filled_counter = 0
 
     def get_data_by_split(self, split):
@@ -204,6 +227,7 @@ class VisualWordDataGenerator(object):
         dscrp_array = np.zeros((split_size, self.max_seq_len,
                                 len(self.word2index)))
         img_array = np.zeros((split_size, self.max_seq_len, IMG_FEATS))
+        hsn_array = np.zeros((split_size, self.max_seq_len, HSN_SIZE))
 
         d_idx = 0  # description index
         for data_key in self.dataset[split]:
@@ -213,6 +237,8 @@ class VisualWordDataGenerator(object):
                     description.split())
                 img_array[d_idx, 0, :] = self.get_image_features(self.dataset,
                     split, data_key)
+                if self.hsn:
+                  hsn_array[d_idx, 0, :] = self.get_hsn_features('val', data_key)
                 d_idx += 1
                 if d_idx >= split_size:
                     break
@@ -226,7 +252,7 @@ class VisualWordDataGenerator(object):
                     split, self.actual_max_seq_len)
         # TODO: truncate dscrp_array, img_array, targets
         # to actual_max_seq_len (+ padding)
-        return (dscrp_array, img_array, targets)
+        return (dscrp_array, img_array, targets, hsn_array)
 
     def get_image_features_matrix(self, split):
         """ Creates the image features matrix/vector for a dataset split.
@@ -243,6 +269,10 @@ class VisualWordDataGenerator(object):
                 break
             img_array[idx, 0, :] = self.get_image_features(split, data_key)
         return img_array
+
+    def get_hsn_features(self, split, data_key):
+        """ Return image features vector for split[data_key]."""
+        return floatX(self.source_dataset[split][data_key]['final_hidden_features'])
 
     def get_image_features(self, dataset, split, data_key):
         """ Return image features vector for split[data_key]."""

@@ -78,32 +78,51 @@ class VisualWordLSTM:
     self.bleu_score(self.args.checkpoint)
 
   def generate_sentences(self, filepath, val=True):
-        """ XXX WARNING stella: I've removed split and features here, replaced
-        with hdf5 dataset, but I haven't understood this method.
-        Also: dataset descriptions do not have BOS/EOS padding.
+        """ 
+        Generates descriptions of images for --generation_timesteps
+        iterations through the LSTM. Each description is clipped to 
+        the first <E> token. This process can be additionally conditioned 
+        on source language hidden representations, if provided by the
+        --source_vectors parameter.
+
+        TODO: beam search
+        TODO: duplicated method with generate.py
         """
-        prefix = "val" if val else "train"
+        prefix = "val" if val else "test"
         logger.info("Generating %s sentences from this model\n", prefix)
         handle = codecs.open("%s/%sGenerated" % (filepath, prefix), "w", 
                              'iso-8859-16')
 
-        # Generating image descriptions involves create a
-        # sentence vector with the <S> symbol
-        complete_sentences = [["<S>"] for _ in self.dataset['val']]
-        vfeats = np.zeros((len(self.dataset['val']), 
-                          self.args.generation_timesteps+1, IMG_FEATS))
-        for idx,data_key in enumerate(self.dataset['val']):
-            # scf: I am kind of guessing here (replacing feats)
-            if val:
-                vfeats[idx,0] = self.dataset['val'][data_key]['img_feats'][:]
-            else:
-                vfeats[idx,0] = self.dataset['train'][data_key]['img_feats'][:]
-        sents = np.zeros((len(self.dataset['val']),
-                         self.args.generation_timesteps+1, len(self.word2index)))
-        for t in range(self.args.generation_timesteps):
-            preds = self.model.predict([sents, vfeats], verbose=0)
+        # prepare the datastructures for generation
+        sents = np.zeros((len(self.dataset[prefix]),
+                          self.args.generate_timesteps+1, 
+                          len(self.word2index)))
+        vfeats = np.zeros((len(self.dataset[prefix]), 
+                           self.args.generate_timesteps+1, 
+                           IMG_FEATS))
+        if self.args.source_vectors != None:
+          source_feats = np.zeros((len(self.dataset[prefix]), 
+                                   self.args.generate_timesteps+1, 
+                                   HSN_SIZE))
+
+        # populate the datastructures from the h5
+        for idx,data_key in enumerate(self.dataset[prefix]):
+            # vfeats at time=0 only to avoid overfitting
+            vfeats[idx,0] = self.dataset[prefix][data_key]['img_feats'][:]
+            if self.args.source_vectors != None:
+                source_feats[idx,0] = self.source_dataset[prefix][data_key]\
+                                      ['final_hidden_features'][:]
+
+        # holds the sentences as words instead of indices
+        complete_sentences = [["<S>"] for _ in self.dataset[prefix]] 
+
+        for t in range(self.args.generate_timesteps):
+            preds = self.model.predict([sents, source_feats, vfeats] if
+                                        self.args.source_vectors != None 
+                                        else [sents, vfeats], verbose=0)
+
             next_word_indices = np.argmax(preds[:,t], axis=1)
-            for i in range(len(self.dataset['val'])):
+            for i in range(len(self.dataset[prefix])):
                 sents[i, t+1, next_word_indices[i]] = 1.
             next_words = [self.index2word[x] for x in next_word_indices]
             for i in range(len(next_words)):
@@ -111,6 +130,7 @@ class VisualWordLSTM:
 
         sys.stdout.flush()
 
+        # extract each sentence until it hits the first end-of-string token
         for s in complete_sentences:
             handle.write(' '.join([x for x
                                    in itertools.takewhile(
@@ -176,6 +196,7 @@ if __name__ == "__main__":
   parser.add_argument("--checkpoint", type=str, required=True, help="Path to the checkpointed parameters")
   parser.add_argument("--dataset", type=str, help="Dataset on which to evaluate")
   parser.add_argument("--big_batch_size", type=int, default=1000)
+  parser.add_argument("--source_vectors", default=None, type=str, help="Path to source hidden vectors")
 
   parser.add_argument("--optimiser", default="adagrad", type=str, help="Optimiser: rmsprop, momentum, adagrad, etc.")
   parser.add_argument("--l2reg", default=1e-8, type=float, help="L2 cost penalty. Default=1e-8")

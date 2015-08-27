@@ -4,6 +4,7 @@ Entry module and class module for training a VisualWordLSTM.
 
 from __future__ import print_function
 
+import theano
 import argparse
 import logging
 from math import floor
@@ -31,6 +32,10 @@ class VisualWordLSTM(object):
 
         self.V = self.data_generator.get_vocab_size()
 
+        if self.args.debug:
+            theano.config.optimizer='None'
+            theano.config.exception_verbosity='high'
+
     def train_model(self):
         '''
         In the model, we will merge the VGG image representation with
@@ -40,12 +45,13 @@ class VisualWordLSTM(object):
 
         m = models.TwoLayerLSTM(self.args.hidden_size, self.V,
                                 self.args.dropin, self.args.droph,
-                                self.args.optimiser, self.args.l2reg)
-        model = m.buildKerasModel()
+                                self.args.optimiser, self.args.l2reg,
+                                hsn = self.args.source_vectors != None)
+        model = m.buildKerasModel(hsn=self.args.source_vectors != None)
 
         # Keras doesn't do batching of val set, so
         # assume val data is small enough to get all at once.
-        valX, valIX, valY = self.data_generator.get_data_by_split('val')
+        valX, valIX, valY, valS = self.data_generator.get_data_by_split('val')
 
         callbacks = CompilationOfCallbacks(self.data_generator.word2index,
                                            self.data_generator.index2word,
@@ -61,22 +67,29 @@ class VisualWordLSTM(object):
             print(val_check_batch)
             for epoch in range(self.args.epochs):
                 batch = 1
-                for trainX, trainIX, trainY in\
+                for trainX, trainIX, trainY, trainS, indicator in\
                     self.data_generator.yield_training_batch():
                     logger.info("Epoch %d/%d, big-batch %d/%d", epoch, 
                                 self.args.epochs, batch, exp_batches)
-                    if batch % val_check_batch == 0:
+                    
+                    if indicator == True:
                         # let's test on the val after training on these batches
-                        model.fit([trainX, trainIX],
+                        model.fit([trainX, trainS, trainIX] if 
+                                       self.args.source_vectors != None else
+                                           [trainX, trainIX],
                                   trainY,
-                                  validation_data=([valX, valIX], valY),
+                                  validation_data=([valX, valS, valIX] if 
+                                       self.args.source_vectors != None else
+                                           [valX, valIX], valY),
                                   nb_epoch=1,
                                   callbacks=[callbacks],
                                   verbose=1,
                                   batch_size=self.args.batch_size,
                                   shuffle=True)
                     else:  # no callbacks # TODO: no validation?
-                        model.fit([trainX, trainIX],
+                        model.fit([trainX, trainS, trainIX] if 
+                                       self.args.source_vectors != None else
+                                           [trainX, trainIX],
                                   trainY,
                                   nb_epoch=1,
                                   verbose=1,
@@ -134,6 +147,10 @@ if __name__ == "__main__":
     parser.add_argument("--generate_timesteps", default=10, type=int, 
                         help="Maximum number of words to generate for unseen\
                         data (default=10).")
+    parser.add_argument("--source_vectors", default=None, type=str,
+                        help="Path to final hidden representations. (default:\
+                        None.) Expects a final_hidden_representation vector\
+                        for each image in the dataset") 
 
     model = VisualWordLSTM(parser.parse_args())
     model.train_model()
