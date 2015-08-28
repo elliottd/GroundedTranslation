@@ -44,23 +44,24 @@ class TwoLayerLSTM:
             print("... with hsn")
             source_hidden = Sequential()
             source_hidden.add(TimeDistributedDense(self.hsn_size, self.hidden_size,
-                                                   W_regularizer=l2(self.l2reg)))
+                                                   W_regularizer=l2(self.l2reg),
+                                                   activation='relu'))
             source_hidden.add(Dropout(self.dropin))
 
-        # Compress the 4096D VGG FC_7 features into hidden_size
+        # Compress the 4096D VGG FC_15 features into hidden_size
         visual = Sequential()
         visual.add(TimeDistributedDense(4096, self.hidden_size,
-                                        W_regularizer=l2(self.l2reg)))
+                                        W_regularizer=l2(self.l2reg),
+                                        activation='relu'))
         text.add(Dropout(self.dropin))
 
         # Model is a merge of the VGG features and the Word Embedding vectors
         model = Sequential()
         if hsn:
-          innermodel = Sequential()
-          innermodel.add(Merge([text, source_hidden], mode='sum'))
-          model.add(Merge([innermodel, visual], mode='sum'))
+          model.add(Merge([text, source_hidden, visual], mode='sum'))
         else:
           model.add(Merge([text, visual], mode='sum'))
+
         model.add(LSTM(self.hidden_size, self.hidden_size,  # 1st LSTM layer
                        return_sequences=True))
 
@@ -101,7 +102,7 @@ class TwoLayerLSTM:
                                       W_regularizer=l2(self.l2reg)))
         text.add(Dropout(self.dropin))
 
-        # Compress the 4096D VGG FC_7 features into hidden_size
+        # Compress the 4096D VGG FC_15 features into hidden_size
         visual = Sequential()
         visual.add(TimeDistributedDense(4096, self.hidden_size,
                                         W_regularizer=l2(self.l2reg)))
