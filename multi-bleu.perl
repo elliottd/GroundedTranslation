@@ -6,6 +6,7 @@
 # $Id$
 use warnings;
 use strict;
+use open qw(:std :utf8);
 
 my $lowercase = 0;
 if ($ARGV[0] eq "-lc") {
@@ -34,7 +35,7 @@ die("ERROR: could not find reference file $stem") unless scalar @REF;
 sub add_to_ref {
     my ($file,$REF) = @_;
     my $s=0;
-    open(REF,$file) or die "Can't read $file";
+    open(REF, '<:encoding(UTF-8)', $file) or die "Can't read $file";
     while(<REF>) {
 	chop;
 	push @{$$REF[$s++]}, $_;
