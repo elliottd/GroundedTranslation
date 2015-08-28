@@ -43,6 +43,10 @@ class VisualWordLSTM(object):
         the order of the elements in the list is _crucial_.
         '''
 
+        if self.args.fixed_seed:
+            # initialise all parameters from a fixed random seed
+            np.random.seed(1234)
+
         m = models.TwoLayerLSTM(self.args.hidden_size, self.V,
                                 self.args.dropin, self.args.droph,
                                 self.args.optimiser, self.args.l2reg,
@@ -105,6 +109,9 @@ if __name__ == "__main__":
                         help="Optional string to help you identify the run")
     parser.add_argument("--debug", action="store_true",
                         help="Print debug messages to stdout?")
+    parser.add_argument("--fixed_seed", action="store_true", help="initialise\
+                        model parameters from a fixed random seed?\
+                       (default = False)")
 
     parser.add_argument("--small", action="store_true",
         help="Run on 100 image--{sentences} pairing. Useful for debugging")
