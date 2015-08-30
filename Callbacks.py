@@ -78,12 +78,12 @@ class CompilationOfCallbacks(Callback):
     def on_train_end(self, logs={}):
         logger.info("Training complete")
         for epoch in range(len(self.val_loss)):
-            print("Checkpoint %d | val loss: %.5f bleu %.2f"
-                  % (epoch, self.val_loss[epoch], self.val_bleu[epoch]))
+            logger.info("Checkpoint %d | val loss: %.5f bleu %.2f",
+                  epoch, self.val_loss[epoch], self.val_bleu[epoch])
 
         best = np.nanargmax(self.val_bleu)
-        print("Best checkpoint: %d | val loss %.5f bleu %.2f" % (best,
-              self.val_loss[best], self.val_bleu[best]))
+        logger.info("Best checkpoint: %d | val loss %.5f bleu %.2f", best,
+              self.val_loss[best], self.val_bleu[best])
 
     def extract_references(self, directory, val=True):
         """
