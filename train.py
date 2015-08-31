@@ -3,9 +3,10 @@ Entry module and class module for training a VisualWordLSTM.
 """
 
 from __future__ import print_function
+import numpy as np
+np.random.seed(1234) # comment for random behaviour
 
 import theano
-import numpy as np
 import argparse
 import logging
 from math import floor
@@ -44,10 +45,6 @@ class VisualWordLSTM(object):
         '''
 
         self.log_run_arguments()
-
-        if self.args.fixed_seed:
-            # initialise all parameters from a fixed random seed
-            np.random.seed(1234)
 
         if self.args.num_layers == 1:
           m = models.OneLayerLSTM(self.args.hidden_size, self.V,
