@@ -76,14 +76,21 @@ class CompilationOfCallbacks(Callback):
         self.checkpoint_parameters(epoch, logs, path, val_bleu)
 
     def on_train_end(self, logs={}):
+        handle = open("checkpoints/%s/summary" % self.args.run_string, "w")
         logger.info("Training complete")
+        handle.write("Training complete \n")
         for epoch in range(len(self.val_loss)):
             logger.info("Checkpoint %d | val loss: %.5f bleu %.2f",
                   epoch, self.val_loss[epoch], self.val_bleu[epoch])
+            handle.write("Checkpoint %d | val loss: %.5f bleu %.2f\n"
+                         %(epoch, self.val_loss[epoch], self.val_bleu[epoch]))
 
         best = np.nanargmax(self.val_bleu)
         logger.info("Best checkpoint: %d | val loss %.5f bleu %.2f", best,
               self.val_loss[best], self.val_bleu[best])
+        handle.write("Best checkpoint: %d | val loss %.5f bleu %.2f" % (best,
+              self.val_loss[best], self.val_bleu[best]))
+        handle.close()
 
     def extract_references(self, directory, val=True):
         """
@@ -225,44 +232,55 @@ class CompilationOfCallbacks(Callback):
         logger.info("Generating %s sentences from this model\n", prefix)
         handle = codecs.open("%s/%sGenerated" % (filepath, prefix), "w", 
                              'utf-8')
-
-        # prepare the datastructures for generation
-        sents = np.zeros((len(self.dataset[prefix]),
-                          self.args.generate_timesteps+1, 
-                          len(self.word2index)))
-        vfeats = np.zeros((len(self.dataset[prefix]), 
-                           self.args.generate_timesteps+1, 
-                           IMG_FEATS))
-        if self.args.source_vectors != None:
-          source_feats = np.zeros((len(self.dataset[prefix]), 
-                                   self.args.generate_timesteps+1, 
-                                   HSN_SIZE))
-
-        # populate the datastructures from the h5
-        for idx,data_key in enumerate(self.dataset[prefix]):
-            # vfeats at time=0 only to avoid overfitting
-            vfeats[idx,0] = self.dataset[prefix][data_key]['img_feats'][:]
-            sents[idx,0,self.word2index["<S>"]] = 1 # 1 == BOS token
-            if self.args.source_vectors != None:
-                source_feats[idx,0] = self.source_dataset[prefix][data_key]\
-                                      ['final_hidden_features'][:]
-
         # holds the sentences as words instead of indices
-        complete_sentences = [["<S>"] for _ in self.dataset[prefix]] 
+        complete_sentences = []
 
-        for t in range(self.args.generate_timesteps):
-            preds = self.model.predict([sents, source_feats, vfeats] if
-                                        self.args.source_vectors != None 
-                                        else [sents, vfeats], verbose=0)
+        for start, end in zip(range(0, 
+                                    len(self.dataset[prefix])+1, 
+                                    self.args.batch_size), 
+                              range(self.args.batch_size, 
+                                    len(self.dataset[prefix])+1, 
+                                    self.args.batch_size)):
 
-            next_word_indices = np.argmax(preds[:,t], axis=1)
-            for i in range(len(self.dataset[prefix])):
-                sents[i, t+1, next_word_indices[i]] = 1.
-            next_words = [self.index2word[x] for x in next_word_indices]
-            for i in range(len(next_words)):
-                complete_sentences[i].append(next_words[i])
+            batch_sentences = [["<S>"] for _ in range(self.args.batch_size)]
+            # prepare the datastructures for generation
+            sents = np.zeros((self.args.batch_size,
+                              self.args.generation_timesteps+1, 
+                              self.vocab_len))
+            vfeats = np.zeros((self.args.batch_size, 
+                               self.args.generation_timesteps+1, 
+                               IMG_FEATS))
+            if self.args.source_vectors != None:
+              source_feats = np.zeros((self.args.batch_size, 
+                                       self.args.generation_timesteps+1, 
+                                       HSN_SIZE))
+            idx = 0
+            h5items = self.dataset[prefix].keys()
+            # populate the datastructures from the h5
+            for data_key in h5items[start:end]:
+                # vfeats at time=0 only to avoid overfitting
+                vfeats[idx,0] = self.dataset[prefix][data_key]['img_feats'][:]
+                sents[idx,0,self.word2index["<S>"]] = 1 # 1 == BOS token
+                if self.args.source_vectors != None:
+                    source_feats[idx,0] = self.data_generator.source_dataset[prefix][data_key]\
+                                          ['final_hidden_features'][:]
+                idx += 1
+    
+            for t in range(self.args.generation_timesteps):
+                preds = self.model.predict([sents, source_feats, vfeats] if
+                                            self.args.source_vectors != None 
+                                            else [sents, vfeats], verbose=0)
+    
+                next_word_indices = np.argmax(preds[:,t], axis=1)
+                for i in range(self.args.batch_size):
+                    sents[i, t+1, next_word_indices[i]] = 1.
+                next_words = [self.index2word[x] for x in next_word_indices]
+                for i in range(len(next_words)):
+                    batch_sentences[i].append(next_words[i])
 
-        sys.stdout.flush()
+            complete_sentences.extend(batch_sentences)
+    
+            sys.stdout.flush()
 
         # extract each sentence until it hits the first end-of-string token
         for s in complete_sentences:
