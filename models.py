@@ -104,7 +104,7 @@ class OneLayerLSTM:
         # Model is a merge of the VGG features and the Word Embedding vectors
         model = Sequential()
         model.add(Merge([text, visual], mode='sum'))
-        model.add(GRU(self.hidden_size, self.hidden_size,  # 1st GRU layer
+        model.add(LSTM(self.hidden_size, self.hidden_size,  # 1st GRU layer
                        return_sequences=True))
 
         model.compile(loss='categorical_crossentropy',

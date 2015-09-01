@@ -9,7 +9,7 @@ np.random.seed(1234) # comment for random behaviour
 import theano
 import argparse
 import logging
-from math import floor
+from math import ceil
 
 from Callbacks import CompilationOfCallbacks
 from data_generator import VisualWordDataGenerator
@@ -69,12 +69,8 @@ class VisualWordLSTM(object):
                                            self.args.dataset)
 
         if self.args.big_batch_size > 0:
-            exp_batches = int(floor(self.data_generator.split_sizes['train']/
+            exp_batches = int(ceil(float(self.data_generator.split_sizes['train'])/
                              self.args.big_batch_size))
-            val_check_batch = int(floor(exp_batches * 
-                                             (self.args.checkpointing/100)))-1
-            print(exp_batches)
-            print(val_check_batch)
             for epoch in range(self.args.epochs):
                 batch = 1
                 for trainX, trainIX, trainY, trainS, indicator in\
