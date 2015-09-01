@@ -246,7 +246,7 @@ class CompilationOfCallbacks(Callback):
             # prepare the datastructures for generation
             sents = np.zeros((self.args.batch_size,
                               self.args.generation_timesteps+1, 
-                              self.vocab_len))
+                              len(self.word2index)))
             vfeats = np.zeros((self.args.batch_size, 
                                self.args.generation_timesteps+1, 
                                IMG_FEATS))

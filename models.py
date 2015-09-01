@@ -1,7 +1,7 @@
 from keras.models import Sequential
 # Below: Dense was unused
 from keras.layers.core import Activation, Dropout, Merge, TimeDistributedDense
-from keras.layers.recurrent import LSTM
+from keras.layers.recurrent import LSTM, GRU
 # from keras.optimizers import RMSprop, SGD, Adagrad # unused
 from keras.regularizers import l2
 
@@ -104,7 +104,7 @@ class OneLayerLSTM:
         # Model is a merge of the VGG features and the Word Embedding vectors
         model = Sequential()
         model.add(Merge([text, visual], mode='sum'))
-        model.add(LSTM(self.hidden_size, self.hidden_size,  # 1st LSTM layer
+        model.add(GRU(self.hidden_size, self.hidden_size,  # 1st GRU layer
                        return_sequences=True))
 
         model.compile(loss='categorical_crossentropy',
