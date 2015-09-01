@@ -55,7 +55,7 @@ class VisualWordLSTM:
     self.data_generator.set_vocabulary(self.args.checkpoint)
     self.vocab_len = len(self.data_generator.index2word)
 
-    m = models.TwoLayerLSTM(self.args.hidden_size, self.vocab_len,
+    m = models.OneLayerLSTM(self.args.hidden_size, self.vocab_len,
                             self.args.dropin, self.args.droph,
                             self.args.optimiser, self.args.l2reg,
                             weights=self.args.checkpoint)
@@ -65,10 +65,6 @@ class VisualWordLSTM:
     self.generate_activations("", 'train')
 
   def generate_activations(self, filepath, split):
-        """ XXX WARNING stella: I've removed split and features here, replaced
-        with hdf5 dataset, but I haven't understood this method.
-        Also: dataset descriptions do not have BOS/EOS padding.
-        """
         logger.info("Generating hsn activations from this model for %s\n", split)
  
         hsn_shape = 0

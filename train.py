@@ -3,11 +3,13 @@ Entry module and class module for training a VisualWordLSTM.
 """
 
 from __future__ import print_function
+import numpy as np
+np.random.seed(1234) # comment for random behaviour
 
 import theano
 import argparse
 import logging
-from math import floor
+from math import ceil
 
 from Callbacks import CompilationOfCallbacks
 from data_generator import VisualWordDataGenerator
@@ -16,7 +18,6 @@ import models
 # Set up logger
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
-
 
 class VisualWordLSTM(object):
     """LSTM that combines visual features with textual descriptions.
@@ -43,14 +44,19 @@ class VisualWordLSTM(object):
         the order of the elements in the list is _crucial_.
         '''
 
-        if self.args.fixed_seed:
-            # initialise all parameters from a fixed random seed
-            np.random.seed(1234)
+        self.log_run_arguments()
 
-        m = models.TwoLayerLSTM(self.args.hidden_size, self.V,
-                                self.args.dropin, self.args.droph,
-                                self.args.optimiser, self.args.l2reg,
-                                hsn = self.args.source_vectors != None)
+        if self.args.num_layers == 1:
+          m = models.OneLayerLSTM(self.args.hidden_size, self.V,
+                                  self.args.dropin,
+                                  self.args.optimiser, self.args.l2reg,
+                                  hsn = self.args.source_vectors != None)
+        else:
+          m = models.TwoLayerLSTM(self.args.hidden_size, self.V,
+                                  self.args.dropin, self.args.droph,
+                                  self.args.optimiser, self.args.l2reg,
+                                  hsn = self.args.source_vectors != None)
+
         model = m.buildKerasModel(hsn=self.args.source_vectors != None)
 
         # Keras doesn't do batching of val set, so
@@ -63,12 +69,8 @@ class VisualWordLSTM(object):
                                            self.args.dataset)
 
         if self.args.big_batch_size > 0:
-            exp_batches = int(floor(self.data_generator.split_sizes['train']/
+            exp_batches = int(ceil(float(self.data_generator.split_sizes['train'])/
                              self.args.big_batch_size))
-            val_check_batch = int(floor(exp_batches * 
-                                             (self.args.checkpointing/100)))-1
-            print(exp_batches)
-            print(val_check_batch)
             for epoch in range(self.args.epochs):
                 batch = 1
                 for trainX, trainIX, trainY, trainS, indicator in\
@@ -100,6 +102,15 @@ class VisualWordLSTM(object):
                                   batch_size=self.args.batch_size,
                                   shuffle=True)
                     batch += 1
+
+    def log_run_arguments(self):
+        '''
+        Save the command-line arguments, along with the method defaults,
+        used to parameterise this run.
+        '''
+        logger.info("Run arguments:")
+        for arg, value in self.args.__dict__.iteritems():
+            logger.info("%s: %s" % (arg, str(value)))
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(
@@ -136,6 +147,9 @@ if __name__ == "__main__":
                         help="Prob. of dropping embedding units. Default=0.5")
     parser.add_argument("--droph", default=0.2, type=float,
                         help="Prob. of dropping hidden units. Default=0.2")
+    parser.add_argument("--num_layers", default=1, type=int,
+                        help="Number of layers in the LSTM (default=1),\
+                        options = 1 or 2")
 
     parser.add_argument("--optimiser", default="adagrad", type=str,
                         help="Optimiser: rmsprop, momentum, adagrad, etc.")
@@ -151,7 +165,7 @@ if __name__ == "__main__":
 
     parser.add_argument("--unk", type=int,
                         help="unknown character cut-off. Default=5", default=5)
-    parser.add_argument("--generate_timesteps", default=10, type=int, 
+    parser.add_argument("--generation_timesteps", default=10, type=int, 
                         help="Maximum number of words to generate for unseen\
                         data (default=10).")
     parser.add_argument("--source_vectors", default=None, type=str,

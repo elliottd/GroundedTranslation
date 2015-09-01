@@ -65,15 +65,15 @@ class VisualWordDataGenerator(object):
         self.datasets = []
         if not input_dataset:
             logger.warn("No dataset given, using flickr8k")
-            self.dataset = h5py.File("flickr8k/dataset.h5", "r+")
+            self.dataset = h5py.File("flickr8k/dataset.h5", "r")
         else:
-            self.dataset = h5py.File("%s/dataset.h5" % input_dataset, "r+")
+            self.dataset = h5py.File("%s/dataset.h5" % input_dataset, "r")
         logger.info("Train/val dataset: %s", input_dataset)
 
         if args_dict.supertrain_datasets != None:
             for path in args_dict.supertrain_datasets:
                 logger.info("Adding supertrain datasets: %s", path)
-                self.datasets.append(h5py.File("%s/dataset.h5" % path, "r+"))
+                self.datasets.append(h5py.File("%s/dataset.h5" % path, "r"))
         self.datasets.append(self.dataset)
 
         self.hsn = False
@@ -299,7 +299,7 @@ class VisualWordDataGenerator(object):
 
         logger.info("Split sizes %s", self.split_sizes)
 
-        logger.info("Number of words %d", len(self.word2index))
+        logger.info("Number of words in vocabulary %d", len(self.word2index))
         logger.debug("word2index %s", self.word2index.items())
         logger.debug("Number of indices %d", len(self.index2word))
         logger.debug("index2word: %s", self.index2word.items())
