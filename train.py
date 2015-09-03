@@ -45,6 +45,9 @@ class VisualWordLSTM(object):
         '''
 
         self.log_run_arguments()
+        # Keras doesn't do batching of val set, so
+        # assume val data is small enough to get all at once.
+        valX, valIX, valY, valS = self.data_generator.get_data_by_split('val')
 
         if self.args.num_layers == 1:
           m = models.OneLayerLSTM(self.args.hidden_size, self.V,
@@ -58,10 +61,6 @@ class VisualWordLSTM(object):
                                   hsn = self.args.source_vectors != None)
 
         model = m.buildKerasModel(hsn=self.args.source_vectors != None)
-
-        # Keras doesn't do batching of val set, so
-        # assume val data is small enough to get all at once.
-        valX, valIX, valY, valS = self.data_generator.get_data_by_split('val')
 
         callbacks = CompilationOfCallbacks(self.data_generator.word2index,
                                            self.data_generator.index2word,
@@ -128,6 +127,8 @@ if __name__ == "__main__":
         help="Run on 100 image--{sentences} pairing. Useful for debugging")
     parser.add_argument("--num_sents", default=5, type=int,
         help="Number of descriptions per image to use for training")
+    parser.add_argument("--small_val", action="store_true",
+        help="Validate on 100 image--{sentences} pairing. Useful speed")
 
     parser.add_argument("--dataset", default="", type=str, help="Path to the\
                         HDF5 dataset to use for training / val input\

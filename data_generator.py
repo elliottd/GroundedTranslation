@@ -203,6 +203,23 @@ class VisualWordDataGenerator(object):
                                  HSN_SIZE))
             filled_counter = 0
 
+    def resize_arrays(self, new_size, dscrp, img, hsn=None):
+        '''
+        Sometimes we need to initialise a np.zeros() to an arbitrary size
+        and then cut it down to out intended new_size.
+        '''
+
+        logger.info("Resizing batch_size in structures from %d -> %d",
+                    dscrp.shape[0], new_size)
+
+        new_dscrp = np.resize(dscrp, (new_size, dscrp.shape[1], dscrp.shape[2]))
+        new_img = np.resize(img, (new_size, img.shape[1], img.shape[2]))
+        if hsn != None:
+            new_hsn = np.resize(hsn, (new_size, hsn.shape[1], hsn.shape[2]))
+            return (new_dscrp, new_img, new_hsn)
+
+        return (new_dscrp, new_img)
+
     def get_data_by_split(self, split):
         """ Gets all input data for model for a given split (ie. train, val,
         test).
@@ -221,15 +238,18 @@ class VisualWordDataGenerator(object):
                         this is probably NOT WHAT YOU INTENDED")
 
         split_size = self.split_sizes[split]
-        if self.small:
-            split_size = 100
 
         dscrp_array = np.zeros((split_size, self.max_seq_len,
                                 len(self.word2index)))
         img_array = np.zeros((split_size, self.max_seq_len, IMG_FEATS))
         hsn_array = np.zeros((split_size, self.max_seq_len, HSN_SIZE))
 
+        intended_size = np.inf
+        if self.args_dict.small_val:
+            intended_size = 100
+
         d_idx = 0  # description index
+        i_idx = 0  # image index
         for data_key in self.dataset[split]:
             ds = self.dataset[split][data_key]['descriptions']
             for description in ds:
@@ -240,16 +260,24 @@ class VisualWordDataGenerator(object):
                 if self.hsn:
                   hsn_array[d_idx, 0, :] = self.get_hsn_features('val', data_key)
                 d_idx += 1
-                if d_idx >= split_size:
-                    break
+            i_idx += 1
             # This is a stupid way to break out of a nested for-loop
-            if d_idx >= split_size:
+            if i_idx >= intended_size:
                 break
+
+        if intended_size == 100:
+            dscrp_array,\
+            img_array,\
+            hsn_array = self.resize_arrays(d_idx, 
+                                           dscrp_array, 
+                                           img_array, 
+                                           hsn_array)
 
         targets = self.get_target_descriptions(dscrp_array)
 
         logger.info("actual max_seq_len in split %s: %d",
                     split, self.actual_max_seq_len)
+        logger.info("dscrp_array size: %s", dscrp_array.shape)
         # TODO: truncate dscrp_array, img_array, targets
         # to actual_max_seq_len (+ padding)
         return (dscrp_array, img_array, targets, hsn_array)

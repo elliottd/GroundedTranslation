@@ -104,6 +104,9 @@ class CompilationOfCallbacks(Callback):
                 for descr in self.dataset['val'][data_key]['descriptions']:
                     this_image.append(descr)
                 references.append(this_image)
+                if self.args.small_val:
+                    if len(references) >= 100:
+                        break
         else:  
             for data_key in self.dataset['test']:
                 this_image = []
@@ -235,11 +238,13 @@ class CompilationOfCallbacks(Callback):
         # holds the sentences as words instead of indices
         complete_sentences = []
 
-        for start, end in zip(range(0, 
-                                    len(self.dataset[prefix])+1, 
+        max_size = 100 + 1 if self.args.small_val else len(self.dataset[prefix]) + 1
+
+        for start, end in zip(range(0,
+                                    max_size, 
                                     self.args.batch_size), 
-                              range(self.args.batch_size, 
-                                    len(self.dataset[prefix])+1, 
+                              range(self.args.batch_size,
+                                    max_size,
                                     self.args.batch_size)):
 
             batch_sentences = [["<S>"] for _ in range(self.args.batch_size)]

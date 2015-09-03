@@ -56,7 +56,7 @@ class VisualWordLSTM:
     self.vocab_len = len(self.data_generator.index2word)
 
     m = models.OneLayerLSTM(self.args.hidden_size, self.vocab_len,
-                            self.args.dropin, self.args.droph,
+                            self.args.dropin,
                             self.args.optimiser, self.args.l2reg,
                             weights=self.args.checkpoint)
 
