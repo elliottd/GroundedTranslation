@@ -96,10 +96,10 @@ class VisualWordLSTM:
         complete_sentences = []
 
         for start, end in zip(range(0, 
-                                    len(self.dataset[prefix])+1, 
+                                    len(self.dataset[prefix])+1,
                                     self.args.batch_size), 
                               range(self.args.batch_size, 
-                                    len(self.dataset[prefix])+1, 
+                                    len(self.dataset[prefix])+1,
                                     self.args.batch_size)):
 
             batch_sentences = [["<S>"] for _ in range(self.args.batch_size)]
@@ -162,13 +162,6 @@ class VisualWordLSTM:
                 for descr in self.dataset['val'][data_key]['descriptions']:
                     this_image.append(descr)
                 references.append(this_image)
-        else:  # training: middle sample for good luck
-            for int_data_key in xrange(3000, 4000):
-                this_image = []
-                for description in self.dataset['train']\
-                                   [str(int_data_key)]['descriptions']:
-                    this_image.append(description)
-                references.append(this_image)
 
         for refid in xrange(len(references[0])):
             codecs.open('%s/%s_reference.ref%d' % (directory, "val" if val
@@ -196,6 +189,7 @@ if __name__ == "__main__":
   parser.add_argument("--debug", action="store_true", help="Print debug messages to stdout?")
 
   parser.add_argument("--small", action="store_true", help="Run on 100 image--{sentences} pairing. Useful for debugging")
+  parser.add_argument("--small_val", action="store_true", help="Run validation test on 100 images. Useful for speed")
   parser.add_argument("--num_sents", default=5, type=int, help="Number of descriptions/image to use for training")
 
   parser.add_argument("--batch_size", default=100, type=int)
