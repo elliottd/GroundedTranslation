@@ -81,14 +81,15 @@ class CompilationOfCallbacks(Callback):
         handle.write("Training complete \n")
         for epoch in range(len(self.val_loss)):
             logger.info("Checkpoint %d | val loss: %.5f bleu %.2f",
-                  epoch, self.val_loss[epoch], self.val_bleu[epoch])
+                  epoch+1, self.val_loss[epoch], self.val_bleu[epoch])
             handle.write("Checkpoint %d | val loss: %.5f bleu %.2f\n"
-                         %(epoch, self.val_loss[epoch], self.val_bleu[epoch]))
+                         % (epoch+1, self.val_loss[epoch], 
+                            self.val_bleu[epoch]))
 
         best = np.nanargmax(self.val_bleu)
         logger.info("Best checkpoint: %d | val loss %.5f bleu %.2f", best,
               self.val_loss[best], self.val_bleu[best])
-        handle.write("Best checkpoint: %d | val loss %.5f bleu %.2f" % (best,
+        handle.write("Best checkpoint: %d | val loss %.5f bleu %.2f" % (best+1,
               self.val_loss[best], self.val_bleu[best]))
         handle.close()
 
@@ -179,7 +180,7 @@ class CompilationOfCallbacks(Callback):
         user-specified argument self.args.stopping_loss.
         '''
 
-        filepath = "%s/weights.hdf5" % filepath
+        weights_path = "%s/weights.hdf5" % filepath
 
         if self.save_best_only and self.params['do_validation']:
             cur_val_loss = logs.get('val_loss')
@@ -194,12 +195,12 @@ class CompilationOfCallbacks(Callback):
         if self.args.stopping_loss == 'model':
             if cur_val_loss < self.best_val_loss:
                 logger.debug("Saving model because val loss decreased")
-                self.model.save_weights(filepath, overwrite=True)
+                self.model.save_weights(weights_path, overwrite=True)
 
         elif self.args.stopping_loss == 'bleu':
             if cur_val_bleu > self.best_val_bleu:
                 logger.debug("Saving model because bleu increased")
-                self.model.save_weights(filepath, overwrite=True)
+                self.model.save_weights(weights_path, overwrite=True)
 
         elif self.save_best_only and not self.params['do_validation']:
             logger.warn("Can save best model only with val data, skipping")
@@ -209,16 +210,31 @@ class CompilationOfCallbacks(Callback):
         elif not self.save_best_only:
             if self.verbose > 0:
                 logger.debug("Checkpoint %d: saving model", epoch)
-            self.model.save_weights(filepath, overwrite=True)
+            self.model.save_weights(weights_path, overwrite=True)
 
         # save the weights anyway for debug purposes
-        self.model.save_weights(filepath, overwrite=True)
+        self.model.save_weights(weights_path, overwrite=True)
 
         # update the best values, if applicable
         if cur_val_loss < self.best_val_loss:
             self.best_val_loss = cur_val_loss
         if cur_val_bleu > self.best_val_bleu:
             self.best_val_bleu = cur_val_bleu
+
+        optimiser_params = open("%s/optimiser_params" % filepath, "w")
+        for key, value in self.model.optimizer.get_config().items():
+          optimiser_params.write("%s: %s\n" % (key, value))
+        optimiser_params.close()
+
+
+    def yield_chunks(self, split_indices, batch_size):
+        '''
+        self.args.batch_size is not always cleanly divisible by the number of
+        items in the split, so we need to always yield the correct number of
+        items.
+        '''
+        for i in xrange(0, len(split_indices), batch_size):
+            yield split_indices[i:i+batch_size]
 
     def generate_sentences(self, filepath, val=True):
         """ 
@@ -240,44 +256,53 @@ class CompilationOfCallbacks(Callback):
 
         max_size = 100 + 1 if self.args.small_val else len(self.dataset[prefix]) + 1
 
-        for start, end in zip(range(0,
-                                    max_size, 
-                                    self.args.batch_size), 
-                              range(self.args.batch_size,
-                                    max_size,
-                                    self.args.batch_size)):
+        for indices in self.yield_chunks(range(len(self.dataset[prefix])), self.args.batch_size):
+            start = indices[0]
+            end = indices[-1]
+#        for start, end in zip(range(0,
+#                                    max_size, 
+#                                    self.args.batch_size), 
+#                              range(self.args.batch_size,
+#                                    max_size,
+#                                    self.args.batch_size)):
 
-            batch_sentences = [["<S>"] for _ in range(self.args.batch_size)]
+            batch_sentences = [["<S>"] for _ in range(len(indices))]
             # prepare the datastructures for generation
-            sents = np.zeros((self.args.batch_size,
+            sents = np.zeros((len(indices),
                               self.args.generation_timesteps+1, 
                               len(self.word2index)))
-            vfeats = np.zeros((self.args.batch_size, 
+            vfeats = np.zeros((len(indices), 
                                self.args.generation_timesteps+1, 
                                IMG_FEATS))
             if self.args.source_vectors != None:
-              source_feats = np.zeros((self.args.batch_size, 
+              source_feats = np.zeros((len(indices), 
                                        self.args.generation_timesteps+1, 
-                                       HSN_SIZE))
+                                       len(self.source_dataset['train']['000000']['final_hidden_features'][:])))
             idx = 0
             h5items = self.dataset[prefix].keys()
             # populate the datastructures from the h5
             for data_key in h5items[start:end]:
                 # vfeats at time=0 only to avoid overfitting
                 vfeats[idx,0] = self.dataset[prefix][data_key]['img_feats'][:]
-                sents[idx,0,self.word2index["<S>"]] = 1 # 1 == BOS token
+                sents[idx,0,self.word2index["<S>"]] = 1. # BOS
                 if self.args.source_vectors != None:
-                    source_feats[idx,0] = self.data_generator.source_dataset[prefix][data_key]\
+                    source_feats[idx,0] = self.source_dataset[prefix][data_key]\
                                           ['final_hidden_features'][:]
                 idx += 1
     
             for t in range(self.args.generation_timesteps):
-                preds = self.model.predict([sents, source_feats, vfeats] if
+                # we take a view of the datastructures, which means we're only 
+                # ever generating a prediction for the next word. This saves a
+                # lot of cycles.
+                preds = self.model.predict([sents[:,0:t+1], 
+                                            source_feats[:,0:t+1], 
+                                            vfeats[:,0:t+1]] if
                                             self.args.source_vectors != None 
-                                            else [sents, vfeats], verbose=0)
+                                            else [sents[:,0:t+1], 
+                                                  vfeats[:,0:t+1]], verbose=0)
     
                 next_word_indices = np.argmax(preds[:,t], axis=1)
-                for i in range(self.args.batch_size):
+                for i in range(len(indices)):
                     sents[i, t+1, next_word_indices[i]] = 1.
                 next_words = [self.index2word[x] for x in next_word_indices]
                 for i in range(len(next_words)):

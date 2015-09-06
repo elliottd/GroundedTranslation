@@ -16,6 +16,7 @@ from collections import defaultdict
 import shutil
 import cPickle
 import logging
+import time
 import codecs
 
 from ptbtokenizer import PTBTokenizer
@@ -28,7 +29,6 @@ logger = logging.getLogger(__name__)
 
 # Dimensionality of image feature vector
 IMG_FEATS = 4096
-HSN_SIZE = 409
 
 class VisualWordLSTM:
 
@@ -66,11 +66,12 @@ class VisualWordLSTM:
     self.word2index = self.data_generator.word2index
 
     X, IX, Y, S = self.data_generator.get_data_by_split("val")
+    self.hsn_size = S.shape[2]
 
     m = models.OneLayerLSTM(self.args.hidden_size, self.vocab_len,
                             self.args.dropin,
                             self.args.optimiser, self.args.l2reg,
-                            hsn = self.args.source_vectors != None,
+                            hsn_size = self.hsn_size,
                             weights=self.args.checkpoint)
     self.model = m.buildKerasModel(hsn=self.args.source_vectors != None)
 
@@ -84,6 +85,7 @@ class VisualWordLSTM:
         the first <E> token. This process can be additionally conditioned 
         on source language hidden representations, if provided by the
         --source_vectors parameter.
+
 
         TODO: beam search
         TODO: duplicated method with generate.py
@@ -101,6 +103,8 @@ class VisualWordLSTM:
                               range(self.args.batch_size, 
                                     len(self.dataset[prefix])+1,
                                     self.args.batch_size)):
+            if self.args.debug:
+              btic = time.time()
 
             batch_sentences = [["<S>"] for _ in range(self.args.batch_size)]
             # prepare the datastructures for generation
@@ -113,7 +117,7 @@ class VisualWordLSTM:
             if self.args.source_vectors != None:
               source_feats = np.zeros((self.args.batch_size, 
                                        self.args.generation_timesteps+1, 
-                                       HSN_SIZE))
+                                       self.hsn_size))
             idx = 0
             h5items = self.dataset[prefix].keys()
             # populate the datastructures from the h5
@@ -127,9 +131,19 @@ class VisualWordLSTM:
                 idx += 1
     
             for t in range(self.args.generation_timesteps):
-                preds = self.model.predict([sents, source_feats, vfeats] if
+                if self.args.debug:
+                  tic = time.time()
+                # we take a view of the datastructures, which means we're only 
+                # ever generating a prediction for the next word. This saves a
+                # lot of cycles.
+                preds = self.model.predict([sents[:,0:t+1],  
+                                            source_feats[:,0:t+1], 
+                                            vfeats[:,0:t+1]] if
                                             self.args.source_vectors != None 
-                                            else [sents, vfeats], verbose=0)
+                                            else [sents[:,0:t+1], 
+                                                  vfeats[:,0:t+1]], verbose=0)
+                if self.args.debug:
+                  logger.info("Forward pass took %f", time.time()-tic)
     
                 next_word_indices = np.argmax(preds[:,t], axis=1)
                 for i in range(self.args.batch_size):
@@ -141,6 +155,8 @@ class VisualWordLSTM:
             complete_sentences.extend(batch_sentences)
     
             sys.stdout.flush()
+            if self.args.debug:
+                logger.info("Batch took %f s", time.time()-btic)
 
         # extract each sentence until it hits the first end-of-string token
         for s in complete_sentences:
@@ -208,6 +224,9 @@ if __name__ == "__main__":
   parser.add_argument("--l2reg", default=1e-8, type=float, help="L2 cost penalty. Default=1e-8")
   parser.add_argument("--unk", type=int, default=5)
   parser.add_argument("--supertrain_datasets", nargs="+")
+  parser.add_argument("--write_access_h5", action="store_true", 
+                      help="Open the H5 file for write-access? Useful for\
+                      serialising hidden states to disk. (default = False)")
 
   w = VisualWordLSTM(parser.parse_args())
   w.generationModel()
