@@ -37,6 +37,10 @@ class VisualWordLSTM(object):
             theano.config.optimizer='None'
             theano.config.exception_verbosity='high'
 
+        if self.args.gpu_id != -1:
+            theano.config.device='gpu%d' % self.args.gpu_id
+            theano.config.floatX = 'float32'
+
     def train_model(self):
         '''
         In the model, we will merge the VGG image representation with
@@ -53,12 +57,12 @@ class VisualWordLSTM(object):
           m = models.OneLayerLSTM(self.args.hidden_size, self.V,
                                   self.args.dropin,
                                   self.args.optimiser, self.args.l2reg,
-                                  hsn = self.args.source_vectors != None)
+                                  hsn_size = valS.shape[2])
         else:
           m = models.TwoLayerLSTM(self.args.hidden_size, self.V,
                                   self.args.dropin, self.args.droph,
                                   self.args.optimiser, self.args.l2reg,
-                                  hsn = self.args.source_vectors != None)
+                                  hsn_size = valS.shape[2])
 
         model = m.buildKerasModel(hsn=self.args.source_vectors != None)
 
@@ -74,7 +78,7 @@ class VisualWordLSTM(object):
                 batch = 1
                 for trainX, trainIX, trainY, trainS, indicator in\
                     self.data_generator.yield_training_batch():
-                    logger.info("Epoch %d/%d, big-batch %d/%d", epoch, 
+                    logger.info("Epoch %d/%d, big-batch %d/%d", epoch+1, 
                                 self.args.epochs, batch, exp_batches)
                     
                     if indicator == True:
@@ -173,6 +177,9 @@ if __name__ == "__main__":
                         help="Path to final hidden representations. (default:\
                         None.) Expects a final_hidden_representation vector\
                         for each image in the dataset") 
+    parser.add_argument("--h5_writeable", action="store_true", 
+                        help="Open the H5 file for write-access? Useful for\
+                        serialising hidden states to disk. (default = False)")
 
     model = VisualWordLSTM(parser.parse_args())
     model.train_model()

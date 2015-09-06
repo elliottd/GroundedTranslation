@@ -51,7 +51,8 @@ class VisualWordLSTM:
     '''
 
     self.data_generator = VisualWordDataGenerator(self.args,
-                                                  self.args.dataset)
+                                                  self.args.dataset,
+                                                  self.args.hidden_size)
     self.data_generator.set_vocabulary(self.args.checkpoint)
     self.vocab_len = len(self.data_generator.index2word)
 
@@ -62,68 +63,75 @@ class VisualWordLSTM:
 
     self.model = m.buildHSNActivations()
 
-    self.generate_activations("", 'train')
+    self.generate_activations('train')
+    self.generate_activations('val')
 
-  def generate_activations(self, filepath, split):
-        logger.info("Generating hsn activations from this model for %s\n", split)
- 
-        hsn_shape = 0
-        hidden_states = []
-        for trainX, trainIX, trainY, trainS in\
-            self.data_generator.yield_training_batch():
-            hsn = self.model.predict([trainX, trainIX],
-                                     batch_size=self.args.batch_size,
-                                     verbose=1)
-            for h in hsn:
+  def generate_activations(self, split, gold=True):
+      '''
+      Generate and serialise final-timestep hidden state activations
+      into --dataset.
+
+      TODO: we should be able to serialise predicted final states instead
+            of gold-standard final states for val and test data.
+      '''
+      logger.info("Generating hsn activations from this model for %s\n", split)
+
+      if split == 'train':
+          hsn_shape = 0
+          hidden_states = []
+          for trainX, trainIX, trainY, trainS, _ in\
+              self.data_generator.yield_training_batch():
+              hsn = self.model.predict([trainX, trainIX],
+                                       batch_size=self.args.batch_size,
+                                       verbose=1)
+              for h in hsn:
+                final_hidden = h[hsn.shape[1]-1]
+                hsn_shape = h.shape[1]
+                hidden_states.append(final_hidden)
+    
+          # now serialise the hidden representations in the h5
+          idx = 0
+          logger.info("Serialising final hidden state features to H5")
+          for data_key in self.data_generator.dataset[split]:
+              try:
+                  hsn_data = self.data_generator.dataset[split][data_key].create_dataset("final_hidden_features",
+                                                                     (hsn_shape,), dtype='float32')
+              except RuntimeError:
+                  # the dataset already exists, retrieve it into RAM and then overwrite it
+                  del self.data_generator.dataset[split][data_key]["final_hidden_features"]
+                  hsn_data = self.data_generator.dataset[split][data_key].create_dataset("final_hidden_features",
+                                                                     (hsn_shape,), dtype='float32')
+              hsn_data[:] = hidden_states[idx]
+              idx += 1
+
+      elif split == 'val':
+          valX, valIX, valY, valS = self.data_generator.get_data_by_split('val')
+          logger.info("Generating hsn activations from this model for val\n", )
+   
+          hsn_shape = 0
+          hidden_states = []
+          hsn = self.model.predict([valX, valIX],
+                                   batch_size=self.args.batch_size,
+                                   verbose=1)
+          for h in hsn:
               final_hidden = h[hsn.shape[1]-1]
               hsn_shape = h.shape[1]
               hidden_states.append(final_hidden)
-
-        # now serialise the hidden representations in the h5
-        print(len(hidden_states))
-        print(hsn_shape)
-        print(len(self.data_generator.dataset[split]))
-        idx = 0
-        logger.info("Serialising final hidden state features to H5")
-        for data_key in self.data_generator.dataset[split]:
-          try:
-            hsn_data = self.data_generator.dataset[split][data_key].create_dataset("final_hidden_features",
-                                                               (hsn_shape,), dtype='float32')
-          except RuntimeError:
-            # the dataset already exists, retrieve it into RAM and then overwrite it
-            del self.data_generator.dataset[split][data_key]["final_hidden_features"]
-            hsn_data = self.data_generator.dataset[split][data_key].create_dataset("final_hidden_features",
-                                                               (hsn_shape,), dtype='float32')
-          hsn_data[:] = np.astype(hidden_states[idx], np.float32)
-          idx += 1
-
-        valX, valIX, valY, valS = self.data_generator.get_data_by_split('val')
-        logger.info("Generating hsn activations from this model for val\n", )
- 
-        hsn_shape = 0
-        hidden_states = []
-        hsn = self.model.predict([valX, valIX],
-                                 batch_size=self.args.batch_size,
-                                 verbose=1)
-        for h in hsn:
-            final_hidden = h[hsn.shape[1]-1]
-            hsn_shape = h.shape[1]
-            hidden_states.append(final_hidden)
-
-        # now serialise the hidden representations in the h5
-        idx = 0
-        logger.info("Serialising final hidden state features to H5")
-        for data_key in self.data_generator.dataset['val']:
-          try:
-            hsn_data = self.data_generator.dataset['val'][data_key].create_dataset("final_hidden_features",
-                                                               (hsn_shape,), dtype='float32')
-          except RuntimeError:
-            # the dataset already exists, retrieve it into RAM and then overwrite it
-            del self.data_generator.dataset['val'][data_key]["final_hidden_features"]
-            hsn_data = self.data_generator.dataset['val'][data_key].create_dataset("final_hidden_features",
-                                                               (hsn_shape,), dtype='float32')
-          hsn_data[:] = hidden_states[idx]
-          idx += 1
+    
+          # now serialise the hidden representations in the h5
+          idx = 0
+          logger.info("Serialising final hidden state features to H5")
+          for data_key in self.data_generator.dataset['val']:
+              try:
+                  hsn_data = self.data_generator.dataset['val'][data_key].create_dataset("final_hidden_features",
+                                                                     (hsn_shape,), dtype='float32')
+              except RuntimeError:
+                  # the dataset already exists, retrieve it into RAM and then overwrite it
+                  del self.data_generator.dataset['val'][data_key]["final_hidden_features"]
+                  hsn_data = self.data_generator.dataset['val'][data_key].create_dataset("final_hidden_features",
+                                                                     (hsn_shape,), dtype='float32')
+              hsn_data[:] = hidden_states[idx]
+              idx += 1
 
 if __name__ == "__main__":
   parser = argparse.ArgumentParser(description="Serialise the final RNN hidden state vector for each instance in a trainin data.")
@@ -133,6 +141,8 @@ if __name__ == "__main__":
 
   parser.add_argument("--small", action="store_true", help="Run on 100 image--{sentences} pairing. Useful for debugging")
   parser.add_argument("--num_sents", default=5, type=int, help="Number of descriptions/image to use for training")
+  parser.add_argument("--small_val", action="store_true",
+        help="Validate on 100 image--{sentences} pairing. Useful speed")
 
   parser.add_argument("--batch_size", default=100, type=int)
   parser.add_argument("--hidden_size", default=512, type=int)
@@ -150,6 +160,9 @@ if __name__ == "__main__":
   parser.add_argument("--unk", type=int, default=5)
   parser.add_argument("--supertrain_datasets", nargs="+")
   parser.add_argument("--source_vectors", default=None)
+  parser.add_argument("--h5_writeable", action="store_true", 
+                      help="Open the H5 file for write-access? Useful for\
+                      serialising hidden states to disk. (default = False)")
 
   w = VisualWordLSTM(parser.parse_args())
   w.get_hsn_activations()

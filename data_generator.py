@@ -24,7 +24,6 @@ PAD = "<P>"  # index 0
 
 # Dimensionality of image feature vector
 IMG_FEATS = 4096
-HSN_SIZE = 409
 
 class VisualWordDataGenerator(object):
     """
@@ -39,7 +38,7 @@ class VisualWordDataGenerator(object):
             images, targets) for the dataset split (train/val/test/as given by
             the hdf5 dataset keys)
     """
-    def __init__(self, args_dict, input_dataset=None):
+    def __init__(self, args_dict, input_dataset=None, hsn=0):
         """
         Initialise data generator: this involves loading the dataset and
         generating vocabulary sizes.
@@ -47,6 +46,7 @@ class VisualWordDataGenerator(object):
         """
         logger.info("Initialising data generator")
         self.args_dict = args_dict
+        self.hsn_size = hsn
 
         # size of chucks that the generator should return;
         # if None returns full dataset at once.
@@ -63,11 +63,12 @@ class VisualWordDataGenerator(object):
         # self.datasets holds 1+ datasets, where additional datasets will
         # be used for supertraining the model
         self.datasets = []
+        openmode = "r+" if self.args_dict.h5_writeable else "r"
         if not input_dataset:
             logger.warn("No dataset given, using flickr8k")
-            self.dataset = h5py.File("flickr8k/dataset.h5", "r")
+            self.dataset = h5py.File("flickr8k/dataset.h5", openmode)
         else:
-            self.dataset = h5py.File("%s/dataset.h5" % input_dataset, "r")
+            self.dataset = h5py.File("%s/dataset.h5" % input_dataset, openmode)
         logger.info("Train/val dataset: %s", input_dataset)
 
         if args_dict.supertrain_datasets != None:
@@ -80,7 +81,7 @@ class VisualWordDataGenerator(object):
         if self.args_dict.source_vectors != None:
           self.source_dataset = h5py.File("%s/dataset.h5" % self.args_dict.source_vectors, "r")
           self.hsn = True
-          print(self.get_hsn_features('train', '000214'))
+          self.hsn_size = len(self.source_dataset['train']['000000']['final_hidden_features'])
 
         # These variables are filled by extract_vocabulary
         self.word2index = dict()
@@ -116,7 +117,7 @@ class VisualWordDataGenerator(object):
                               IMG_FEATS))
         hsn_array = np.zeros((self.big_batch_size,
                             self.max_seq_len,
-                            HSN_SIZE))
+                            self.hsn_size))
 
         num_descriptions = 0  # indexing descriptions found so far
         batch_max_seq_len = 0
@@ -147,7 +148,7 @@ class VisualWordDataGenerator(object):
                                              self.max_seq_len, IMG_FEATS))
                        hsn_array = np.zeros((self.big_batch_size,
                                             self.max_seq_len,
-                                            HSN_SIZE))
+                                            self.hsn_size))
                        filled_counter = 0
     
                    # Breaking out of nested loop (braindead)
@@ -176,15 +177,13 @@ class VisualWordDataGenerator(object):
             # batch_index is not guaranteed to modulo zero on the
             # final big_batch. This if statement catches that and
             # resizes the final yielded dscrp/img_array and targets
-            dscrp_array = np.resize(dscrp_array, (filled_counter,
-                                    self.max_seq_len,
-                                    len(self.word2index)))
-            img_array = np.resize(img_array, (filled_counter,
-                                  self.max_seq_len,
-                                  IMG_FEATS))
-            hsn_array = np.resize(hsn_array, (filled_counter,
-                                  self.max_seq_len,
-                                  HSN_SIZE))
+            if filled_counter != self.big_batch_size:
+                dscrp_array,\
+                img_array,\
+                hsn_array = self.resize_arrays(filled_counter,
+                                               dscrp_array,
+                                               img_array,
+                                               hsn_array)
             # Return (filled0 big_batch array
             # Truncate descriptions to max length of batch (plus
             # 3, for padding and safety)
@@ -200,7 +199,7 @@ class VisualWordDataGenerator(object):
                                   self.max_seq_len, IMG_FEATS))
             hsn_array = np.zeros((self.big_batch_size,
                                  self.max_seq_len,
-                                 HSN_SIZE))
+                                 self.hsn_size))
             filled_counter = 0
 
     def resize_arrays(self, new_size, dscrp, img, hsn=None):
@@ -242,7 +241,7 @@ class VisualWordDataGenerator(object):
         dscrp_array = np.zeros((split_size, self.max_seq_len,
                                 len(self.word2index)))
         img_array = np.zeros((split_size, self.max_seq_len, IMG_FEATS))
-        hsn_array = np.zeros((split_size, self.max_seq_len, HSN_SIZE))
+        hsn_array = np.zeros((split_size, self.max_seq_len, self.hsn_size))
 
         intended_size = np.inf
         if self.args_dict.small_val:
