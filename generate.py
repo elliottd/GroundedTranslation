@@ -78,6 +78,15 @@ class VisualWordLSTM:
     self.generate_sentences(self.args.checkpoint)
     self.bleu_score(self.args.checkpoint)
 
+  def yield_chunks(self, split_indices, batch_size):
+        '''
+        self.args.batch_size is not always cleanly divisible by the number of
+        items in the split, so we need to always yield the correct number of
+        items.
+        '''
+        for i in xrange(0, len(split_indices), batch_size):
+            yield split_indices[i:i+batch_size]
+
   def generate_sentences(self, filepath, val=True):
         """ 
         Generates descriptions of images for --generation_timesteps
@@ -97,25 +106,23 @@ class VisualWordLSTM:
         # holds the sentences as words instead of indices
         complete_sentences = []
 
-        for start, end in zip(range(0, 
-                                    len(self.dataset[prefix])+1,
-                                    self.args.batch_size), 
-                              range(self.args.batch_size, 
-                                    len(self.dataset[prefix])+1,
-                                    self.args.batch_size)):
+        for indices in self.yield_chunks(range(len(self.dataset[prefix])), self.args.batch_size):
+            start = indices[0]
+            end = indices[-1]
+
             if self.args.debug:
               btic = time.time()
 
-            batch_sentences = [["<S>"] for _ in range(self.args.batch_size)]
+            batch_sentences = [["<S>"] for _ in range(len(indices))]
             # prepare the datastructures for generation
-            sents = np.zeros((self.args.batch_size,
+            sents = np.zeros((len(indices),
                               self.args.generation_timesteps+1, 
                               self.vocab_len))
-            vfeats = np.zeros((self.args.batch_size, 
+            vfeats = np.zeros((len(indices), 
                                self.args.generation_timesteps+1, 
                                IMG_FEATS))
             if self.args.source_vectors != None:
-              source_feats = np.zeros((self.args.batch_size, 
+              source_feats = np.zeros((len(indices), 
                                        self.args.generation_timesteps+1, 
                                        self.hsn_size))
             idx = 0
@@ -146,7 +153,7 @@ class VisualWordLSTM:
                   logger.info("Forward pass took %f", time.time()-tic)
     
                 next_word_indices = np.argmax(preds[:,t], axis=1)
-                for i in range(self.args.batch_size):
+                for i in range(len(indices)):
                     sents[i, t+1, next_word_indices[i]] = 1.
                 next_words = [self.index2word[x] for x in next_word_indices]
                 for i in range(len(next_words)):
