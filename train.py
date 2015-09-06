@@ -37,10 +37,6 @@ class VisualWordLSTM(object):
             theano.config.optimizer='None'
             theano.config.exception_verbosity='high'
 
-        if self.args.gpu_id != -1:
-            theano.config.device='gpu%d' % self.args.gpu_id
-            theano.config.floatX = 'float32'
-
     def train_model(self):
         '''
         In the model, we will merge the VGG image representation with
