@@ -53,7 +53,8 @@ class VisualWordLSTM(object):
           m = models.OneLayerLSTM(self.args.hidden_size, self.V,
                                   self.args.dropin,
                                   self.args.optimiser, self.args.l2reg,
-                                  hsn_size = valS.shape[2])
+                                  hsn_size = valS.shape[2],
+                                  gru=self.args.gru)
         else:
           m = models.TwoLayerLSTM(self.args.hidden_size, self.V,
                                   self.args.dropin, self.args.droph,
@@ -151,6 +152,8 @@ if __name__ == "__main__":
     parser.add_argument("--num_layers", default=1, type=int,
                         help="Number of layers in the LSTM (default=1),\
                         options = 1 or 2")
+    parser.add_argument("--gru", action="store_true", help="Use GRU instead\
+                        of LSTM recurrent state? (default = False)")
 
     parser.add_argument("--optimiser", default="adagrad", type=str,
                         help="Optimiser: rmsprop, momentum, adagrad, etc.")

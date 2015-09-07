@@ -72,7 +72,8 @@ class VisualWordLSTM:
                             self.args.dropin,
                             self.args.optimiser, self.args.l2reg,
                             hsn_size = self.hsn_size,
-                            weights=self.args.checkpoint)
+                            weights=self.args.checkpoint,
+                            gru=self.args.gru)
     self.model = m.buildKerasModel(hsn=self.args.source_vectors != None)
 
     self.generate_sentences(self.args.checkpoint)
@@ -219,6 +220,8 @@ if __name__ == "__main__":
   parser.add_argument("--hidden_size", default=512, type=int)
   parser.add_argument("--dropin", default=0.5, type=float, help="Prob. of dropping embedding units. Default=0.5")
   parser.add_argument("--droph", default=0.2, type=float, help="Prob. of dropping hidden units. Default=0.2")
+  parser.add_argument("--gru", action="store_true", help="Use GRU instead\
+                      of LSTM recurrent state? (default = False)")
 
   parser.add_argument("--test", action="store_true", help="Generate for the test images? Default=False")
   parser.add_argument("--generation_timesteps", default=10, type=int, help="Attempt to generate how many words?")

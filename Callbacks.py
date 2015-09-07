@@ -87,7 +87,7 @@ class CompilationOfCallbacks(Callback):
                             self.val_bleu[epoch]))
 
         best = np.nanargmax(self.val_bleu)
-        logger.info("Best checkpoint: %d | val loss %.5f bleu %.2f", best,
+        logger.info("Best checkpoint: %d | val loss %.5f bleu %.2f", best+1,
               self.val_loss[best], self.val_bleu[best])
         handle.write("Best checkpoint: %d | val loss %.5f bleu %.2f" % (best+1,
               self.val_loss[best], self.val_bleu[best]))

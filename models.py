@@ -13,7 +13,7 @@ import shutil
 class OneLayerLSTM:
 
     def __init__(self, hidden_size, vocab_size, dropin, optimiser,
-                 l2reg, hsn_size=512, weights=None):
+                 l2reg, hsn_size=512, weights=None, gru=False):
         self.hidden_size = hidden_size  # number of units in first LSTM
         self.dropin = dropin  # prob. of dropping input units
         self.vocab_size = vocab_size  # size of word vocabulary
@@ -21,6 +21,7 @@ class OneLayerLSTM:
         self.l2reg = l2reg  # weight regularisation penalty
         self.hsn_size = hsn_size # size of the source hidden vector
         self.weights = weights  # initialise with checkpointed weights?
+        self.gru = gru # gru recurrent layer? (false = lstm)
 
     def buildKerasModel(self, hsn=False):
         '''
@@ -38,7 +39,6 @@ class OneLayerLSTM:
         text.add(TimeDistributedDense(self.vocab_size, self.hidden_size,
                                       W_regularizer=l2(self.l2reg)))
         text.add(Dropout(self.dropin))
-        #text.add(Activation('tanh'))
 
         if hsn:
             print("... with hsn")
@@ -46,14 +46,12 @@ class OneLayerLSTM:
             source_hidden.add(TimeDistributedDense(self.hsn_size, self.hidden_size,
                                                    W_regularizer=l2(self.l2reg)))
             source_hidden.add(Dropout(self.dropin))
-            #source_hidden.add(Activation('tanh'))
 
         # Compress the 4096D VGG FC_15 features into hidden_size
         visual = Sequential()
         visual.add(TimeDistributedDense(4096, self.hidden_size,
                                         W_regularizer=l2(self.l2reg)))
         visual.add(Dropout(self.dropin))
-        #visual.add(Activation('tanh'))
 
         # Model is a merge of the VGG features and the Word Embedding vectors
         model = Sequential()
@@ -62,8 +60,12 @@ class OneLayerLSTM:
         else:
           model.add(Merge([text, visual], mode='sum'))
 
-        model.add(LSTM(self.hidden_size, self.hidden_size,  # 1st LSTM layer
-                       return_sequences=True))
+        if self.gru:
+            model.add(GRU(self.hidden_size, self.hidden_size,  # GRU layer
+                           return_sequences=True))
+        else:
+            model.add(LSTM(self.hidden_size, self.hidden_size,  # LSTM layer
+                           return_sequences=True))
         model.add(TimeDistributedDense(self.hidden_size, self.vocab_size,
                                        W_regularizer=l2(self.l2reg)))
         model.add(Activation('time_distributed_softmax'))
