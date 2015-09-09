@@ -9,6 +9,7 @@ Dependencies
 * theano 0.7
 * Keras 0.11
 * h5py 2.5.0
+* [dominate](https://github.com/Knio/dominate) to visualise the generated descriptions
 
 Data
 ---
