@@ -18,7 +18,6 @@ import cPickle
 import logging
 import codecs
 
-from ptbtokenizer import PTBTokenizer
 from data_generator import VisualWordDataGenerator
 import models
 
@@ -36,7 +35,6 @@ class VisualWordLSTM:
     self.vocab = dict()
     self.unkdict = dict()
     self.counter = 0
-    self.tokenizer = PTBTokenizer()
     self.maxSeqLen = 0
 
     if self.args.debug:
