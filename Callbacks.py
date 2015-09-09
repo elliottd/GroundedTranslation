@@ -149,7 +149,8 @@ class CompilationOfCallbacks(Callback):
         '''
 
         prefix = self.args.run_string if self.args.run_string != "" else ""
-        filepath = "checkpoints/%s/%s" % ((prefix, savetime))
+        number = "%03d" % (len(self.val_loss) + 1)
+        filepath = "checkpoints/%s/%s-%s" % ((prefix, savetime, number))
         try:
             os.mkdir("checkpoints/%s/" % (prefix))
             shutil.copyfile("train.py", "checkpoints/%s/train.py" % prefix)
@@ -157,7 +158,7 @@ class CompilationOfCallbacks(Callback):
         except OSError:
             pass  # directory already exists
         try:
-            os.mkdir("checkpoints/%s/%s" % ((prefix, savetime)))
+            os.mkdir(filepath)
         except OSError:
             pass  # directory already exists
         print("In %s ...\n" % filepath)
@@ -186,8 +187,9 @@ class CompilationOfCallbacks(Callback):
             cur_val_loss = logs.get('val_loss')
 
             logger.info("Checkpoint %d: | val loss %0.5f (best: %0.5f) bleu\
-                         %0.2f (best %0.2f)", epoch, cur_val_loss,
-                        self.best_val_loss, cur_val_bleu, self.best_val_bleu)
+                         %0.2f (best %0.2f)", (len(self.val_loss) + 1), 
+                         cur_val_loss, self.best_val_loss, cur_val_bleu, 
+                         self.best_val_bleu)
 
             self.val_loss.append(cur_val_loss)
             self.val_bleu.append(cur_val_bleu)
