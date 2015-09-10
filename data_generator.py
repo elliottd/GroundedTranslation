@@ -229,6 +229,10 @@ class VisualWordDataGenerator(object):
                 timestep, img_feats at timestep=0 else 0]
             targets: target array for text LSTM (same format and data as
                 descriptions, timeshifted)
+
+        Changed: If small_val is set, the original arrays are now also a bit
+        smaller than split_size (and then truncated to d_idx, as before). This
+        is so I can run this on a lower-memory machine without swapping.
         """
 
         logger.info("Making data for %s", split)
@@ -237,15 +241,17 @@ class VisualWordDataGenerator(object):
                         this is probably NOT WHAT YOU INTENDED")
 
         split_size = self.split_sizes[split]
+        intended_size = np.inf
+        if self.args_dict.small_val:
+            intended_size = 100
+            # Make split_size comfortably bigger than intended_size
+            split_size = 200 * self.args_dict.num_sents
 
         dscrp_array = np.zeros((split_size, self.max_seq_len,
                                 len(self.word2index)))
         img_array = np.zeros((split_size, self.max_seq_len, IMG_FEATS))
         hsn_array = np.zeros((split_size, self.max_seq_len, self.hsn_size))
 
-        intended_size = np.inf
-        if self.args_dict.small_val:
-            intended_size = 100
 
         d_idx = 0  # description index
         i_idx = 0  # image index
@@ -264,7 +270,8 @@ class VisualWordDataGenerator(object):
             if i_idx >= intended_size:
                 break
 
-        if intended_size == 100:
+        if self.args_dict.small_val:
+            # d_idx (number of descriptions before break) is new size.
             dscrp_array,\
             img_array,\
             hsn_array = self.resize_arrays(d_idx, 
