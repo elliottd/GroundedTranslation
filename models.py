@@ -9,6 +9,12 @@ import h5py
 
 import math
 import shutil
+import logging
+
+# Set up logger
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
+
 
 class OneLayerLSTM:
 
@@ -19,9 +25,9 @@ class OneLayerLSTM:
         self.vocab_size = vocab_size  # size of word vocabulary
         self.optimiser = optimiser  # optimisation method
         self.l2reg = l2reg  # weight regularisation penalty
-        self.hsn_size = hsn_size # size of the source hidden vector
+        self.hsn_size = hsn_size  # size of the source hidden vector
         self.weights = weights  # initialise with checkpointed weights?
-        self.gru = gru # gru recurrent layer? (false = lstm)
+        self.gru = gru  # gru recurrent layer? (false = lstm)
 
     def buildKerasModel(self, hsn=False):
         '''
@@ -32,7 +38,7 @@ class OneLayerLSTM:
         The order in which these appear below (text, image) is _IMMUTABLE_.
         '''
 
-        print('Building Keras model...')
+        logger.info('Building Keras model...')
 
         # We will learn word representations for each word
         text = Sequential()
@@ -41,7 +47,7 @@ class OneLayerLSTM:
         text.add(Dropout(self.dropin))
 
         if hsn:
-            print("... with hsn")
+            logger.info("... with hsn")
             source_hidden = Sequential()
             source_hidden.add(TimeDistributedDense(self.hsn_size, self.hidden_size,
                                                    W_regularizer=l2(self.l2reg)))
@@ -56,13 +62,13 @@ class OneLayerLSTM:
         # Model is a merge of the VGG features and the Word Embedding vectors
         model = Sequential()
         if hsn:
-          model.add(Merge([text, source_hidden, visual], mode='sum'))
+            model.add(Merge([text, source_hidden, visual], mode='sum'))
         else:
-          model.add(Merge([text, visual], mode='sum'))
+            model.add(Merge([text, visual], mode='sum'))
 
         if self.gru:
             model.add(GRU(self.hidden_size, self.hidden_size,  # GRU layer
-                           return_sequences=True))
+                          return_sequences=True))
         else:
             model.add(LSTM(self.hidden_size, self.hidden_size,  # LSTM layer
                            return_sequences=True))
@@ -74,9 +80,10 @@ class OneLayerLSTM:
                       optimizer=self.optimiser)
 
         if self.weights is not None:
+            logger.info("... with weights defined in %s", self.weights)
             # Initialise the weights of the model
-            shutil.copyfile("%s/weights.hdf5" % self.weights, 
-                           "%s/weights.hdf5.bak" % self.weights)
+            shutil.copyfile("%s/weights.hdf5" % self.weights,
+                            "%s/weights.hdf5.bak" % self.weights)
             model.load_weights("%s/weights.hdf5" % self.weights)
 
         return model
@@ -90,7 +97,7 @@ class OneLayerLSTM:
         The order in which these appear below (text, image) is _IMMUTABLE_.
         '''
 
-        print('Building Keras model...')
+        logger.info('Building Keras model...')
 
         # We will learn word representations for each word
         text = Sequential()
@@ -114,17 +121,20 @@ class OneLayerLSTM:
                       optimizer=self.optimiser)
 
         if self.weights is not None:
+            logger.info("... with weights defined in %s", self.weights)
             # Initialise the weights of the model
-            shutil.copyfile("%s/weights.hdf5" % self.weights, 
-                           "%s/weights.hdf5.bak" % self.weights)
+            shutil.copyfile("%s/weights.hdf5" % self.weights,
+                            "%s/weights.hdf5.bak" % self.weights)
             f = h5py.File("%s/weights.hdf5" % self.weights)
             for k in range(f.attrs['nb_layers']-2):
                 g = f['layer_{}'.format(k)]
-                weights = [g['param_{}'.format(p)] for p in range(g.attrs['nb_params'])]
+                weights = [g['param_{}'.format(p)]
+                           for p in range(g.attrs['nb_params'])]
                 model.layers[k].set_weights(weights)
             f.close()
 
         return model
+
 
 class TwoLayerLSTM:
 

@@ -4,7 +4,7 @@ Entry module and class module for training a VisualWordLSTM.
 
 from __future__ import print_function
 import numpy as np
-np.random.seed(1234) # comment for random behaviour
+np.random.seed(1234)  # comment for random behaviour
 
 import theano
 import argparse
@@ -18,6 +18,7 @@ import models
 # Set up logger
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
+
 
 class VisualWordLSTM(object):
     """LSTM that combines visual features with textual descriptions.
@@ -34,14 +35,15 @@ class VisualWordLSTM(object):
         self.V = self.data_generator.get_vocab_size()
 
         if self.args.debug:
-            theano.config.optimizer='None'
-            theano.config.exception_verbosity='high'
+            theano.config.optimizer = 'None'
+            theano.config.exception_verbosity = 'high'
 
     def train_model(self):
         '''
         In the model, we will merge the VGG image representation with
-        the word embeddings. We need to feed the data as a list, in which
-        the order of the elements in the list is _crucial_.
+        the word embeddings and the source-langauge multimodal vectors.
+        We need to feed the data as a list, in which the order of the elements
+        in the list is _crucial_.
         '''
 
         self.log_run_arguments()
@@ -50,18 +52,20 @@ class VisualWordLSTM(object):
         valX, valIX, valY, valS = self.data_generator.get_data_by_split('val')
 
         if self.args.num_layers == 1:
-          m = models.OneLayerLSTM(self.args.hidden_size, self.V,
-                                  self.args.dropin,
-                                  self.args.optimiser, self.args.l2reg,
-                                  hsn_size = valS.shape[2],
-                                  gru=self.args.gru)
+            m = models.OneLayerLSTM(self.args.hidden_size, self.V,
+                                    self.args.dropin,
+                                    self.args.optimiser, self.args.l2reg,
+                                    hsn_size=valS.shape[2],
+                                    weights=self.args.init_from_checkpoint,
+                                    gru=self.args.gru)
         else:
-          m = models.TwoLayerLSTM(self.args.hidden_size, self.V,
-                                  self.args.dropin, self.args.droph,
-                                  self.args.optimiser, self.args.l2reg,
-                                  hsn_size = valS.shape[2])
+            m = models.TwoLayerLSTM(self.args.hidden_size, self.V,
+                                    self.args.dropin, self.args.droph,
+                                    self.args.optimiser, self.args.l2reg,
+                                    hsn_size=valS.shape[2],
+                                    weights=self.args.init_from_checkpoint)
 
-        model = m.buildKerasModel(hsn=self.args.source_vectors != None)
+        model = m.buildKerasModel(hsn=self.args.source_vectors is not None)
 
         callbacks = CompilationOfCallbacks(self.data_generator.word2index,
                                            self.data_generator.index2word,
@@ -69,33 +73,35 @@ class VisualWordLSTM(object):
                                            self.args.dataset)
 
         if self.args.big_batch_size > 0:
-            exp_batches = int(ceil(float(self.data_generator.split_sizes['train'])/
-                             self.args.big_batch_size))
+            batches = ceil(float(self.data_generator.split_sizes['train']) /
+                           self.args.big_batch_size)
+            batches = int(batches)
             for epoch in range(self.args.epochs):
                 batch = 1
-                for trainX, trainIX, trainY, trainS, indicator in\
-                    self.data_generator.yield_training_batch():
-                    logger.info("Epoch %d/%d, big-batch %d/%d", epoch+1, 
-                                self.args.epochs, batch, exp_batches)
-                    
-                    if indicator == True:
+                for trainX, trainIX, trainY, trainS, indicator in self.data_generator.yield_training_batch():
+                    logger.info("Epoch %d/%d, big-batch %d/%d", epoch+1,
+                                self.args.epochs, batch, batches)
+
+                    if indicator is True:
                         # let's test on the val after training on these batches
-                        model.fit([trainX, trainS, trainIX] if 
-                                       self.args.source_vectors != None else
-                                           [trainX, trainIX],
+                        model.fit([trainX, trainS, trainIX] if
+                                  self.args.source_vectors is not None else
+                                  [trainX, trainIX],
                                   trainY,
-                                  validation_data=([valX, valS, valIX] if 
-                                       self.args.source_vectors != None else
-                                           [valX, valIX], valY),
+
+                                  validation_data=([valX, valS, valIX] if
+                                  self.args.source_vectors is not None else
+                                  [valX, valIX], valY),
+
                                   nb_epoch=1,
                                   callbacks=[callbacks],
                                   verbose=1,
                                   batch_size=self.args.batch_size,
                                   shuffle=True)
-                    else:  # no callbacks # TODO: no validation?
-                        model.fit([trainX, trainS, trainIX] if 
-                                       self.args.source_vectors != None else
-                                           [trainX, trainIX],
+                    else:
+                        model.fit([trainX, trainS, trainIX] if
+                                  self.args.source_vectors is not None else
+                                  [trainX, trainIX],
                                   trainY,
                                   nb_epoch=1,
                                   verbose=1,
@@ -121,15 +127,18 @@ if __name__ == "__main__":
     parser.add_argument("--debug", action="store_true",
                         help="Print debug messages to stdout?")
     parser.add_argument("--fixed_seed", action="store_true", help="initialise\
-                        model parameters from a fixed random seed?\
+                        numpy rng from a fixed random seed? Useful for debug.\
                        (default = False)")
+    parser.add_argument("--init_from_checkpoint", help="Initialise the model\
+                        parameters from a pre-defined checkpoint? Useful to\
+                        continue training a model.", default=None, type=str)
 
     parser.add_argument("--small", action="store_true",
-        help="Run on 100 image--{sentences} pairing. Useful for debugging")
+                        help="Run on 100 images. Useful for debugging")
     parser.add_argument("--num_sents", default=5, type=int,
-        help="Number of descriptions per image to use for training")
+                        help="Number of descriptions/image for training")
     parser.add_argument("--small_val", action="store_true",
-        help="Validate on 100 image--{sentences} pairing. Useful speed")
+                        help="Validate on 100 images. Useful for speed")
 
     parser.add_argument("--dataset", default="", type=str, help="Path to the\
                         HDF5 dataset to use for training / val input\
@@ -159,7 +168,7 @@ if __name__ == "__main__":
                         help="Optimiser: rmsprop, momentum, adagrad, etc.")
     parser.add_argument("--stopping_loss", default="bleu", type=str,
                         help="minimise cross-entropy or maximise BLEU?")
-    parser.add_argument("--checkpointing", default=100, type=int, 
+    parser.add_argument("--checkpointing", default=100, type=int,
                         help="regularity of checkpointing model parameters,\
                               as a percentage of the training data size\
                               (dataset + supertrain_datasets). (defaults to\
@@ -169,14 +178,14 @@ if __name__ == "__main__":
 
     parser.add_argument("--unk", type=int,
                         help="unknown character cut-off. Default=5", default=5)
-    parser.add_argument("--generation_timesteps", default=10, type=int, 
+    parser.add_argument("--generation_timesteps", default=10, type=int,
                         help="Maximum number of words to generate for unseen\
                         data (default=10).")
     parser.add_argument("--source_vectors", default=None, type=str,
                         help="Path to final hidden representations. (default:\
                         None.) Expects a final_hidden_representation vector\
-                        for each image in the dataset") 
-    parser.add_argument("--h5_writeable", action="store_true", 
+                        for each image in the dataset")
+    parser.add_argument("--h5_writeable", action="store_true",
                         help="Open the H5 file for write-access? Useful for\
                         serialising hidden states to disk. (default = False)")
 
