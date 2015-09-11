@@ -1,12 +1,9 @@
 from keras.models import Sequential
-# Below: Dense was unused
 from keras.layers.core import Activation, Dropout, Merge, TimeDistributedDense
 from keras.layers.recurrent import LSTM, GRU
-# from keras.optimizers import RMSprop, SGD, Adagrad # unused
 from keras.regularizers import l2
 
 import h5py
-
 import math
 import shutil
 import logging
@@ -29,16 +26,18 @@ class OneLayerLSTM:
         self.weights = weights  # initialise with checkpointed weights?
         self.gru = gru  # gru recurrent layer? (false = lstm)
 
-    def buildKerasModel(self, hsn=False):
+    def buildKerasModel(self, use_sourcelang=False, use_image=True):
         '''
         Define the exact structure of your model here. We create an image
         description generation model by merging the VGG image features with
         a word embedding model, with an LSTM over the sequences.
 
         The order in which these appear below (text, image) is _IMMUTABLE_.
+        (Needs to match up with input to model.fit.)
         '''
-
         logger.info('Building Keras model...')
+        logger.info('Using image features: %s', use_image)
+        logger.info('Using source language features: %s', use_sourcelang)
 
         # We will learn word representations for each word
         text = Sequential()
@@ -46,25 +45,33 @@ class OneLayerLSTM:
                                       W_regularizer=l2(self.l2reg)))
         text.add(Dropout(self.dropin))
 
-        if hsn:
-            logger.info("... with hsn")
+        if use_sourcelang:
+            logger.info("... hsn: adding source language vector as input features")
             source_hidden = Sequential()
             source_hidden.add(TimeDistributedDense(self.hsn_size, self.hidden_size,
                                                    W_regularizer=l2(self.l2reg)))
             source_hidden.add(Dropout(self.dropin))
 
-        # Compress the 4096D VGG FC_15 features into hidden_size
-        visual = Sequential()
-        visual.add(TimeDistributedDense(4096, self.hidden_size,
-                                        W_regularizer=l2(self.l2reg)))
-        visual.add(Dropout(self.dropin))
+        if use_image:
+            # Compress the 4096D VGG FC_15 features into hidden_size
+            logger.info("... visual: adding image features as input features")
+            visual = Sequential()
+            visual.add(TimeDistributedDense(4096, self.hidden_size,
+                                            W_regularizer=l2(self.l2reg)))
+            visual.add(Dropout(self.dropin))
 
         # Model is a merge of the VGG features and the Word Embedding vectors
         model = Sequential()
-        if hsn:
+        if use_sourcelang and use_image:
             model.add(Merge([text, source_hidden, visual], mode='sum'))
         else:
-            model.add(Merge([text, visual], mode='sum'))
+            if use_image:
+                model.add(Merge([text, visual], mode='sum'))
+            elif use_sourcelang:
+                model.add(Merge([text, source_hidden], mode='sum'))
+            else: # text sequence model (e.g. source encoder in MT_baseline)
+                assert not use_sourcelang and not use_image
+                model.add(text)
 
         if self.gru:
             model.add(GRU(self.hidden_size, self.hidden_size,  # GRU layer
@@ -88,7 +95,7 @@ class OneLayerLSTM:
 
         return model
 
-    def buildHSNActivations(self):
+    def buildHSNActivations(self, use_image=True):
         '''
         Define the exact structure of your model here. We create an image
         description generation model by merging the VGG image features with
@@ -105,15 +112,19 @@ class OneLayerLSTM:
                                       W_regularizer=l2(self.l2reg)))
         text.add(Dropout(self.dropin))
 
-        # Compress the 4096D VGG FC_15 features into hidden_size
-        visual = Sequential()
-        visual.add(TimeDistributedDense(4096, self.hidden_size,
-                                        W_regularizer=l2(self.l2reg)))
-        text.add(Dropout(self.dropin))
+        if use_image:
+            # Compress the 4096D VGG FC_15 features into hidden_size
+            visual = Sequential()
+            visual.add(TimeDistributedDense(4096, self.hidden_size,
+                                            W_regularizer=l2(self.l2reg)))
+            visual.add(Dropout(self.dropin))
 
         # Model is a merge of the VGG features and the Word Embedding vectors
         model = Sequential()
-        model.add(Merge([text, visual], mode='sum'))
+        if use_image:
+            model.add(Merge([text, visual], mode='sum'))
+        else:
+            model.add(text)
         model.add(LSTM(self.hidden_size, self.hidden_size,  # 1st GRU layer
                        return_sequences=True))
 
@@ -139,7 +150,7 @@ class OneLayerLSTM:
 class TwoLayerLSTM:
 
     def __init__(self, hidden_size, vocab_size, dropin, droph, optimiser,
-                 l2reg, hsn=False, weights=None):
+                 l2reg, use_sourcelang=False, weights=None):
         self.hidden_size = hidden_size  # number of units in first LSTM
         self.dropin = dropin  # prob. of dropping input units
         self.droph = droph  # prob. of dropping hidden->hidden units
@@ -149,7 +160,7 @@ class TwoLayerLSTM:
         self.hsn_size = 409 # size of the source hidden vector
         self.weights = weights  # initialise with checkpointed weights?
 
-    def buildKerasModel(self, hsn=False):
+    def buildKerasModel(self, use_sourcelang=False, use_image=True):
         '''
         Define the exact structure of your model here. We create an image
         description generation model by merging the VGG image features with
@@ -159,6 +170,8 @@ class TwoLayerLSTM:
         '''
 
         print('Building Keras model...')
+        logger.info('Using image features: %s', use_image)
+        logger.info('Using source language features: %s', use_sourcelang)
 
         # We will learn word representations for each word
         text = Sequential()
@@ -166,7 +179,7 @@ class TwoLayerLSTM:
                                       W_regularizer=l2(self.l2reg)))
         text.add(Dropout(self.dropin))
 
-        if hsn:
+        if use_sourcelang:
             print("... with hsn")
             source_hidden = Sequential()
             source_hidden.add(TimeDistributedDense(self.hsn_size, self.hidden_size,
@@ -174,19 +187,27 @@ class TwoLayerLSTM:
                                                    activation='tanh'))
             source_hidden.add(Dropout(self.dropin))
 
-        # Compress the 4096D VGG FC_15 features into hidden_size
-        visual = Sequential()
-        visual.add(TimeDistributedDense(4096, self.hidden_size,
-                                        W_regularizer=l2(self.l2reg),
-                                        activation='tanh'))
-        text.add(Dropout(self.dropin))
+        if use_image:
+            # Compress the 4096D VGG FC_15 features into hidden_size
+            logger.info("... visual: adding image features as input features")
+            visual = Sequential()
+            visual.add(TimeDistributedDense(4096, self.hidden_size,
+                                            W_regularizer=l2(self.l2reg),
+                                            activation='tanh'))
+            visual.add(Dropout(self.dropin))
 
         # Model is a merge of the VGG features and the Word Embedding vectors
         model = Sequential()
-        if hsn:
-          model.add(Merge([text, source_hidden, visual], mode='sum'))
+        if use_sourcelang and use_image:
+            model.add(Merge([text, source_hidden, visual], mode='sum'))
         else:
-          model.add(Merge([text, visual], mode='sum'))
+            if use_image:
+                model.add(Merge([text, visual], mode='sum'))
+            elif use_sourcelang:
+                model.add(Merge([text, source_hidden], mode='sum'))
+            else: # text sequence model (e.g. source encoder in MT_baseline)
+                assert not use_sourcelang and not use_image
+                model.add(text)
 
         model.add(LSTM(self.hidden_size, self.hidden_size,  # 1st LSTM layer
                        return_sequences=True))
@@ -211,7 +232,7 @@ class TwoLayerLSTM:
 
         return model
 
-    def buildHSNActivations(self):
+    def buildHSNActivations(self, use_image=True):
         '''
         Define the exact structure of your model here. We create an image
         description generation model by merging the VGG image features with
@@ -228,15 +249,19 @@ class TwoLayerLSTM:
                                       W_regularizer=l2(self.l2reg)))
         text.add(Dropout(self.dropin))
 
-        # Compress the 4096D VGG FC_15 features into hidden_size
-        visual = Sequential()
-        visual.add(TimeDistributedDense(4096, self.hidden_size,
-                                        W_regularizer=l2(self.l2reg)))
-        text.add(Dropout(self.dropin))
+        if use_image:
+            # Compress the 4096D VGG FC_15 features into hidden_size
+            visual = Sequential()
+            visual.add(TimeDistributedDense(4096, self.hidden_size,
+                                            W_regularizer=l2(self.l2reg)))
+            visual.add(Dropout(self.dropin))
 
         # Model is a merge of the VGG features and the Word Embedding vectors
         model = Sequential()
-        model.add(Merge([text, visual], mode='sum'))
+        if use_image:
+            model.add(Merge([text, visual], mode='sum'))
+        else:
+            model.add(text)
         model.add(LSTM(self.hidden_size, self.hidden_size,  # 1st LSTM layer
                        return_sequences=True))
 

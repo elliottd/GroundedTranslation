@@ -24,10 +24,12 @@ logger = logging.getLogger(__name__)
 IMG_FEATS = 4096
 HSN_SIZE = 409
 
+
 class CompilationOfCallbacks(Callback):
     """ Collection of compiled callbacks."""
 
-    def __init__(self, word2index, index2word, argsDict, dataset):
+    def __init__(self, word2index, index2word, argsDict, dataset,
+                 use_sourcelang=False, use_image=True):
         super(Callback, self).__init__()
 
         self.verbose = True
@@ -44,6 +46,10 @@ class CompilationOfCallbacks(Callback):
         self.index2word = index2word
         self.args = argsDict
 
+        # needed by model.predict in generate_sentences
+        self.use_sourcelang = use_sourcelang
+        self.use_image = use_image
+
         # this results in two file handlers for dataset (here and
         # data_generator)
         if not dataset:
@@ -51,7 +57,7 @@ class CompilationOfCallbacks(Callback):
             self.dataset = h5py.File("flickr8k/dataset.h5", "r")
         else:
             self.dataset = h5py.File("%s/dataset.h5" % dataset, "r")
-        if self.args.source_vectors != None:
+        if self.args.source_vectors is not None:
             self.source_dataset = h5py.File("%s/dataset.h5" % self.args.source_vectors, "r")
 
     def on_epoch_end(self, epoch, logs={}):
@@ -68,8 +74,8 @@ class CompilationOfCallbacks(Callback):
         self.save_run_arguments(path)
 
         # Generate training and val sentences to check for overfitting
-        #self.generate_sentences(path, val=False)
-        #bleu = self.__bleu_score__(path, val=False)
+        # self.generate_sentences(path, val=False)
+        # bleu = self.__bleu_score__(path, val=False)
         self.generate_sentences(path)
         val_bleu = self.__bleu_score__(path)
 
@@ -81,16 +87,16 @@ class CompilationOfCallbacks(Callback):
         handle.write("Training complete \n")
         for epoch in range(len(self.val_loss)):
             logger.info("Checkpoint %d | val loss: %.5f bleu %.2f",
-                  epoch+1, self.val_loss[epoch], self.val_bleu[epoch])
+                        epoch+1, self.val_loss[epoch], self.val_bleu[epoch])
             handle.write("Checkpoint %d | val loss: %.5f bleu %.2f\n"
-                         % (epoch+1, self.val_loss[epoch], 
+                         % (epoch+1, self.val_loss[epoch],
                             self.val_bleu[epoch]))
 
         best = np.nanargmax(self.val_bleu)
         logger.info("Best checkpoint: %d | val loss %.5f bleu %.2f", best+1,
-              self.val_loss[best], self.val_bleu[best])
+                    self.val_loss[best], self.val_bleu[best])
         handle.write("Best checkpoint: %d | val loss %.5f bleu %.2f" % (best+1,
-              self.val_loss[best], self.val_bleu[best]))
+                     self.val_loss[best], self.val_bleu[best]))
         handle.close()
 
     def extract_references(self, directory, val=True):
@@ -108,7 +114,7 @@ class CompilationOfCallbacks(Callback):
                 if self.args.small_val:
                     if len(references) >= 100:
                         break
-        else:  
+        else:
             for data_key in self.dataset['test']:
                 this_image = []
                 for descr in self.dataset['test'][data_key]['descriptions']:
@@ -116,9 +122,9 @@ class CompilationOfCallbacks(Callback):
                 references.append(this_image)
 
         for refid in xrange(len(references[0])):
-            codecs.open('%s/%s_reference.ref%d' % (directory, "val" if val
-                                            else "train", refid),
-                 'w', 'utf-8').write('\n'.join([x[refid] for x in references]))
+            codecs.open('%s/%s_reference.ref%d' % (directory,
+                                                   "val" if val else "train", refid),
+                        'w', 'utf-8').write('\n'.join([x[refid] for x in references]))
 
     def __bleu_score__(self, directory, val=True):
         '''
@@ -187,9 +193,9 @@ class CompilationOfCallbacks(Callback):
             cur_val_loss = logs.get('val_loss')
 
             logger.info("Checkpoint %d: | val loss %0.5f (best: %0.5f) bleu\
-                         %0.2f (best %0.2f)", (len(self.val_loss) + 1), 
-                         cur_val_loss, self.best_val_loss, cur_val_bleu, 
-                         self.best_val_bleu)
+                        %0.2f (best %0.2f)", (len(self.val_loss) + 1),
+                        cur_val_loss, self.best_val_loss, cur_val_bleu,
+                        self.best_val_bleu)
 
             self.val_loss.append(cur_val_loss)
             self.val_bleu.append(cur_val_bleu)
@@ -225,9 +231,8 @@ class CompilationOfCallbacks(Callback):
 
         optimiser_params = open("%s/optimiser_params" % filepath, "w")
         for key, value in self.model.optimizer.get_config().items():
-          optimiser_params.write("%s: %s\n" % (key, value))
+            optimiser_params.write("%s: %s\n" % (key, value))
         optimiser_params.close()
-
 
     def yield_chunks(self, split_indices, batch_size):
         '''
@@ -238,11 +243,44 @@ class CompilationOfCallbacks(Callback):
         for i in xrange(0, len(split_indices), batch_size):
             yield split_indices[i:i+batch_size]
 
+    def make_generation_arrays(self, array_size, prefix, start, end):
+
+            arrays = []
+            img_idx = 1
+            # descriptions/sents
+            arrays.append(np.zeros((array_size,
+                                    self.args.generation_timesteps+1,
+                                    len(self.word2index))))
+            if self.use_sourcelang:
+                num_source_feats = len(self.source_dataset['train']['000000']
+                                       ['final_hidden_features'][:])
+                arrays.append(np.zeros((array_size,
+                                       self.args.generation_timesteps+1,
+                                        num_source_feats)))
+                img_idx += 1  # image features at array[2]
+            if self.use_image:
+                arrays.append(np.zeros((array_size,
+                                        self.args.generation_timesteps+1,
+                                        IMG_FEATS)))
+
+            # populate the datastructures from the h5
+            idx = 0
+            h5items = self.dataset[prefix].keys()
+            for data_key in h5items[start:end]:
+                arrays[0][idx, 0, self.word2index["<S>"]] = 1.  # BOS
+                if self.use_image:
+                    # vfeats at time=0 only to avoid overfitting
+                    arrays[img_idx][idx, 0] = self.dataset[prefix][data_key]['img_feats'][:]
+                if self.use_sourcelang:
+                    arrays[1][idx, 0] = self.source_dataset[prefix][data_key]['final_hidden_features'][:]
+                idx += 1
+            return arrays
+
     def generate_sentences(self, filepath, val=True):
-        """ 
+        """
         Generates descriptions of images for --generation_timesteps
-        iterations through the LSTM. Each description is clipped to 
-        the first <E> token. This process can be additionally conditioned 
+        iterations through the LSTM. Each description is clipped to
+        the first <E> token. This process can be additionally conditioned
         on source language hidden representations, if provided by the
         --source_vectors parameter.
 
@@ -251,67 +289,49 @@ class CompilationOfCallbacks(Callback):
         """
         prefix = "val" if val else "test"
         logger.info("Generating %s sentences from this model\n", prefix)
-        handle = codecs.open("%s/%sGenerated" % (filepath, prefix), "w", 
+        handle = codecs.open("%s/%sGenerated" % (filepath, prefix), "w",
                              'utf-8')
         # holds the sentences as words instead of indices
         complete_sentences = []
 
-        max_size = 100 + 1 if self.args.small_val else len(self.dataset[prefix]) + 1
+        # max_size = 100 + 1 if self.args.small_val else len(self.dataset[prefix]) + 1
 
-        for indices in self.yield_chunks(range(len(self.dataset[prefix])), self.args.batch_size):
+        for indices in self.yield_chunks(range(len(self.dataset[prefix])),
+                                         self.args.batch_size):
             start = indices[0]
             end = indices[-1]
-#        for start, end in zip(range(0,
-#                                    max_size, 
-#                                    self.args.batch_size), 
-#                              range(self.args.batch_size,
-#                                    max_size,
-#                                    self.args.batch_size)):
 
             batch_sentences = [["<S>"] for _ in range(len(indices))]
+
             # prepare the datastructures for generation
-            sents = np.zeros((len(indices),
-                              self.args.generation_timesteps+1, 
-                              len(self.word2index)))
-            vfeats = np.zeros((len(indices), 
-                               self.args.generation_timesteps+1, 
-                               IMG_FEATS))
-            if self.args.source_vectors != None:
-              source_feats = np.zeros((len(indices), 
-                                       self.args.generation_timesteps+1, 
-                                       len(self.source_dataset['train']['000000']['final_hidden_features'][:])))
-            idx = 0
-            h5items = self.dataset[prefix].keys()
-            # populate the datastructures from the h5
-            for data_key in h5items[start:end]:
-                # vfeats at time=0 only to avoid overfitting
-                vfeats[idx,0] = self.dataset[prefix][data_key]['img_feats'][:]
-                sents[idx,0,self.word2index["<S>"]] = 1. # BOS
-                if self.args.source_vectors != None:
-                    source_feats[idx,0] = self.source_dataset[prefix][data_key]\
-                                          ['final_hidden_features'][:]
-                idx += 1
-    
+            arrays = self.make_generation_arrays(len(indices), prefix, start,
+                                                 end)
+
             for t in range(self.args.generation_timesteps):
-                # we take a view of the datastructures, which means we're only 
+                # we take a view of the datastructures, which means we're only
                 # ever generating a prediction for the next word. This saves a
                 # lot of cycles.
-                preds = self.model.predict([sents[:,0:t+1], 
-                                            source_feats[:,0:t+1], 
-                                            vfeats[:,0:t+1]] if
-                                            self.args.source_vectors != None 
-                                            else [sents[:,0:t+1], 
-                                                  vfeats[:,0:t+1]], verbose=0)
-    
-                next_word_indices = np.argmax(preds[:,t], axis=1)
+#                preds = self.model.predict([sents[:,0:t+1],
+#                                           source_feats[:,0:t+1],
+#                                           vfeats[:,0:t+1]] if
+#                                           self.args.source_vectors != None
+#                                           else [sents[:,0:t+1],
+#                                                 vfeats[:,0:t+1]], verbose=0)
+
+                # TODO check that this passes views around, not array copies
+                preds = self.model.predict([arr[:, 0:t+1] for arr in arrays],
+                                           verbose=0)
+
+                next_word_indices = np.argmax(preds[:, t], axis=1)
+                # update array[0]/sentence-so-far with generated words.
                 for i in range(len(indices)):
-                    sents[i, t+1, next_word_indices[i]] = 1.
+                    arrays[0][i, t+1, next_word_indices[i]] = 1.
                 next_words = [self.index2word[x] for x in next_word_indices]
                 for i in range(len(next_words)):
                     batch_sentences[i].append(next_words[i])
 
             complete_sentences.extend(batch_sentences)
-    
+
             sys.stdout.flush()
 
         # extract each sentence until it hits the first end-of-string token

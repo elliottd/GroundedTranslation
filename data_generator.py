@@ -3,7 +3,7 @@ Data processing for VisualWordLSTM happens here; this creates a class that
 acts as a data generator/feed for model training.
 """
 from __future__ import print_function
-from keras.utils.theano_utils import floatX	
+from keras.utils.theano_utils import floatX
 
 from collections import defaultdict
 import cPickle
@@ -25,6 +25,10 @@ PAD = "<P>"  # index 0
 # Dimensionality of image feature vector
 IMG_FEATS = 4096
 
+# How many descriptions to use for training if "--small" is set.
+SMALL_NUM_DESCRIPTIONS = 3000
+
+
 class VisualWordDataGenerator(object):
     """
     Creates input arrays for VisualWordLSTM and deals with input dataset in
@@ -32,8 +36,8 @@ class VisualWordDataGenerator(object):
 
     Important methods:
         yield_training_batch() is a generator function that yields large
-            batches from the training data split (in case training is too large to
-            fit in memory)
+            batches from the training data split (in case training is too
+            large to fit in memory)
         get_data_by_split(split) returns the required arrays (descriptions,
             images, targets) for the dataset split (train/val/test/as given by
             the hdf5 dataset keys)
@@ -43,14 +47,17 @@ class VisualWordDataGenerator(object):
         Initialise data generator: this involves loading the dataset and
         generating vocabulary sizes.
         If dataset is not given, use flickr8k.h5.
+
+        hsn is now officially unused. Will be removed after I deal with
+        extract_hidden_features.py
         """
         logger.info("Initialising data generator")
         self.args_dict = args_dict
-        self.hsn_size = hsn
 
         # size of chucks that the generator should return;
-        # if None returns full dataset at once.
-        self.big_batch_size = args_dict.big_batch_size  # default 0
+        # if 0 returns full dataset at once.
+        # self.big_batch_size = args_dict.big_batch_size
+
         # Number of descriptions to return per image.
         self.num_sents = args_dict.num_sents  # default 5 (for flickr8k)
         self.unk = args_dict.unk  # default 5
@@ -71,17 +78,25 @@ class VisualWordDataGenerator(object):
             self.dataset = h5py.File("%s/dataset.h5" % input_dataset, openmode)
         logger.info("Train/val dataset: %s", input_dataset)
 
-        if args_dict.supertrain_datasets != None:
+        if args_dict.supertrain_datasets is not None:
             for path in args_dict.supertrain_datasets:
                 logger.info("Adding supertrain datasets: %s", path)
                 self.datasets.append(h5py.File("%s/dataset.h5" % path, "r"))
         self.datasets.append(self.dataset)
 
-        self.hsn = False
-        if self.args_dict.source_vectors != None:
-          self.source_dataset = h5py.File("%s/dataset.h5" % self.args_dict.source_vectors, "r")
-          self.hsn = True
-          self.hsn_size = len(self.source_dataset['train']['000000']['final_hidden_features'])
+        # hsn doesn't have to be a class variable.
+#       self.hsn = False
+#       self.hsn_size = 0 # set to 0 or a value explictly.
+        # what happens if self.hsn is false but hsn_size is not zero?
+        if self.args_dict.source_vectors is not None:
+            self.source_dataset = h5py.File("%s/dataset.h5"
+                                            % self.args_dict.source_vectors,
+                                            "r")
+#           self.hsn = True
+#           self.hsn_size = len(self.source_dataset['train']['000000']
+#                               ['final_hidden_features'])
+#       logger.info("Sourcelang/HSN input: %s, size %d", self.hsn,
+#                       self.hsn_size)
 
         # These variables are filled by extract_vocabulary
         self.word2index = dict()
@@ -100,139 +115,145 @@ class VisualWordDataGenerator(object):
         """Return training (currently also +val) vocabulary size."""
         return len(self.word2index)
 
-    def yield_training_batch(self):
+    def get_new_training_arrays(self, array_size, use_sourcelang, use_image):
+        """ Get empty arrays for yield_training_batch. """
+        arrays = []
+        # dscrp_array at arrays[0]
+        arrays.append(np.zeros((array_size,
+                                self.max_seq_len,
+                                len(self.word2index))))
+        if use_sourcelang:  # hsn_array at arrays[1] (if used)
+            arrays.append(np.zeros((array_size,
+                                    self.max_seq_len,
+                                    self.hsn_size)))
+        if use_image:  # at arrays[2] or arrays[1]
+            arrays.append(np.zeros((array_size,
+                                    self.max_seq_len,
+                                    IMG_FEATS)))
+        return arrays
+
+    def yield_training_batch(self, big_batch_size, use_sourcelang=False, use_image=True):
         """
         Returns a batch of training examples.
 
         Uses hdf5 dataset.
         """
-        assert self.big_batch_size > 0
+        assert big_batch_size > 0
         logger.info("Generating training data batch")
 
-        dscrp_array = np.zeros((self.big_batch_size,
-                                self.max_seq_len,
-                                len(self.word2index)))
-        img_array = np.zeros((self.big_batch_size,
-                              self.max_seq_len,
-                              IMG_FEATS))
-        hsn_array = np.zeros((self.big_batch_size,
-                            self.max_seq_len,
-                            self.hsn_size))
-
+        arrays = self.get_new_training_arrays(big_batch_size,
+                                              use_sourcelang, use_image)
         num_descriptions = 0  # indexing descriptions found so far
         batch_max_seq_len = 0
-        filled_counter = 0 # we resize the arrays for the final batch
+        filled_counter = 0  # we resize the arrays for the final batch
+        if use_sourcelang and use_image:  # where is image array in arrays.
+            img_idx = 2
+        else:
+            img_idx = 1
         # Iterate over *images* in training splits
         for dataset in self.datasets:
             for data_key in dataset['train']:
-               ds = dataset['train'][data_key]['descriptions'][0:self.args_dict.num_sents]
-               for description in ds:
-                   batch_index = num_descriptions % self.big_batch_size
-                   # Return (filled0 big_batch array
-                   if (batch_index == 0) and (num_descriptions > 0):
-                       # Truncate descriptions to max length of batch (plus
-                       # 3, for padding and safety)
-                       dscrp_array = dscrp_array[:, :(batch_max_seq_len + 3), :]
-                       img_array = img_array[:, :(batch_max_seq_len + 3), :]
-                       hsn_array = hsn_array[:, :(batch_max_seq_len + 3), :]
-                       targets = self.get_target_descriptions(dscrp_array)
-                       yield (dscrp_array, img_array, targets, hsn_array, filled_counter == self.split_sizes['train'])
-                       # Testing multiple big batches
-                       if self.small and num_descriptions > 3000:
-                           logger.warn("Breaking out of yield_training_batch")
-                           break
-                       dscrp_array = np.zeros((self.big_batch_size,
-                                               self.max_seq_len,
-                                               len(self.word2index)))
-                       img_array = np.zeros((self.big_batch_size,
-                                             self.max_seq_len, IMG_FEATS))
-                       hsn_array = np.zeros((self.big_batch_size,
-                                            self.max_seq_len,
-                                            self.hsn_size))
-                       filled_counter = 0
-    
-                   # Breaking out of nested loop (braindead)
-                   # TODO: replace this with an exception
-                   if self.small and num_descriptions > 3000:
-                       break
-    
-                   if len(description.split()) > batch_max_seq_len:
-                       batch_max_seq_len = len(description.split())
-                   try:
-                     dscrp_array[batch_index, :, :] = self.format_sequence(
-                         description.split())
-                     img_array[batch_index, 0, :] = self.get_image_features(
-                         dataset, 'train', data_key)
-                     if self.hsn:
-                       hsn_array[batch_index, 0, :] = self.get_hsn_features('train', data_key)
-                     num_descriptions += 1
-                     filled_counter += 1
-                   except AssertionError:
-                     continue
-    
-               # Breaking out of nested loop (braindead)
-               if self.small and num_descriptions > 3000:
-                   break
+                ds = dataset['train'][data_key]['descriptions'][0:self.args_dict.num_sents]
+                for description in ds:
+                    batch_index = num_descriptions % big_batch_size
+                    # Return (filled) big_batch array
+                    if (batch_index == 0) and (num_descriptions > 0):
+                        # Truncate descriptions to max length of batch (plus
+                        # 3, for padding and safety)
+                        for i, arr in enumerate(arrays):
+                            arrays[i] = arr[:, :(batch_max_seq_len + 3), :]
+                        targets = self.get_target_descriptions(arrays[0])
+                        yield (arrays, targets,
+                               filled_counter == self.split_sizes['train'])
 
+                        # Testing multiple big batches
+                        if self.small and num_descriptions > SMALL_NUM_DESCRIPTIONS:
+                            logger.warn("Breaking out of yield_training_batch")
+                            break
+
+                        arrays = self.get_new_training_arrays(
+                            big_batch_size, use_sourcelang, use_image)
+                        filled_counter = 0
+
+                    # Breaking out of nested loop (braindead)
+                    # TODO: replace this with an exception
+                    if self.small and num_descriptions > SMALL_NUM_DESCRIPTIONS:
+                        break
+
+                    if len(description.split()) > batch_max_seq_len:
+                        batch_max_seq_len = len(description.split())
+                    try:
+                        # arrays[0] is dscrp_array
+                        arrays[0][batch_index, :, :] = self.format_sequence(
+                            description.split())
+                        if use_sourcelang:
+                            arrays[1][batch_index, 0, :] =\
+                                self.get_hsn_features('train', data_key)
+                        if use_image:
+                            # img_idx is 1 or 2, depending on use_sourcelang
+                            arrays[img_idx][batch_index, 0, :] =\
+                                self.get_image_features(dataset, 'train', data_key)
+                        num_descriptions += 1
+                        filled_counter += 1
+                    except AssertionError:  # where is this from?
+                        continue
+
+                # Breaking out of nested loop (braindead)
+                if self.small and num_descriptions > SMALL_NUM_DESCRIPTIONS:
+                    break
+
+            # End of looping through a dataset (may be one of many).
+            # Yield final batch for this dataset.
             # batch_index is not guaranteed to modulo zero on the
             # final big_batch. This if statement catches that and
             # resizes the final yielded dscrp/img_array and targets
-            if filled_counter != self.big_batch_size:
-                dscrp_array,\
-                img_array,\
-                hsn_array = self.resize_arrays(filled_counter,
-                                               dscrp_array,
-                                               img_array,
-                                               hsn_array)
-            # Return (filled0 big_batch array
+            if filled_counter != big_batch_size:
+                arrays = self.resize_arrays(filled_counter, arrays)
+
+            # Return (filled) big_batch array
             # Truncate descriptions to max length of batch (plus
             # 3, for padding and safety)
-            dscrp_array = dscrp_array[:, :(batch_max_seq_len + 3), :]
-            img_array = img_array[:, :(batch_max_seq_len + 3), :]
-            targets = self.get_target_descriptions(dscrp_array)
-            hsn_array = hsn_array[:, :(batch_max_seq_len + 3), :]
-            yield (dscrp_array, img_array, targets, hsn_array, True)
-            dscrp_array = np.zeros((self.big_batch_size,
-                                    self.max_seq_len,
-                                    len(self.word2index)))
-            img_array = np.zeros((self.big_batch_size,
-                                  self.max_seq_len, IMG_FEATS))
-            hsn_array = np.zeros((self.big_batch_size,
-                                 self.max_seq_len,
-                                 self.hsn_size))
+            for i, arr in enumerate(arrays):
+                arrays[i] = arr[:, :(batch_max_seq_len + 3), :]
+            targets = self.get_target_descriptions(arrays[0])
+            yield (arrays, targets, True)
+            # For next dataset (i.e. if supertraining)
+            arrays = self.get_new_training_arrays(
+                big_batch_size, use_sourcelang, use_image)
             filled_counter = 0
 
-    def resize_arrays(self, new_size, dscrp, img, hsn=None):
-        '''
+    def resize_arrays(self, new_size, arrays):
+        """
+        Resize all the arrays to new_size along dimension 0.
         Sometimes we need to initialise a np.zeros() to an arbitrary size
         and then cut it down to out intended new_size.
-        '''
-
+        """
         logger.info("Resizing batch_size in structures from %d -> %d",
-                    dscrp.shape[0], new_size)
+                    arrays[0].shape[0], new_size)
 
-        new_dscrp = np.resize(dscrp, (new_size, dscrp.shape[1], dscrp.shape[2]))
-        new_img = np.resize(img, (new_size, img.shape[1], img.shape[2]))
-        if hsn != None:
-            new_hsn = np.resize(hsn, (new_size, hsn.shape[1], hsn.shape[2]))
-            return (new_dscrp, new_img, new_hsn)
+        for i, array in enumerate(arrays):
+            arrays[i] = np.resize(array, (new_size, array.shape[1],
+                                          array.shape[2]))
+        return arrays
 
-        return (new_dscrp, new_img)
-
-    def get_data_by_split(self, split):
+    def get_data_by_split(self, split, use_sourcelang=False, use_image=True):
         """ Gets all input data for model for a given split (ie. train, val,
         test).
-        Returns tuple of numpy arrays:
+        Returns tuple containing a list of training input arrays (depending on
+        use_sourcelang and use_image) and a target array.
+        Training arrays may contain (in this order)
             descriptions: input array for text LSTM [item, timestep,
-                vocab_onehot]
-            image: input array of image features [item,
-                timestep, img_feats at timestep=0 else 0]
-            targets: target array for text LSTM (same format and data as
+                vocab_onehot] (necessary)
+            source language:  input array of hidden state vectors for source
+                language features (optional)
+            image: input array of image features [item, timestep, img_feats at
+                    timestep=0 else 0] (optional)
+        Targets: target array for text LSTM (same format and data as
                 descriptions, timeshifted)
 
         Changed: If small_val is set, the original arrays are now also a bit
         smaller than split_size (and then truncated to d_idx, as before). This
-        is so I can run this on a lower-memory machine without swapping.
+        is so I can run this on a lower-memory machine without thrashing.
         """
 
         logger.info("Making data for %s", split)
@@ -247,23 +268,25 @@ class VisualWordDataGenerator(object):
             # Make split_size comfortably bigger than intended_size
             split_size = 200 * self.args_dict.num_sents
 
-        dscrp_array = np.zeros((split_size, self.max_seq_len,
-                                len(self.word2index)))
-        img_array = np.zeros((split_size, self.max_seq_len, IMG_FEATS))
-        hsn_array = np.zeros((split_size, self.max_seq_len, self.hsn_size))
-
+        arrays = self.get_new_training_arrays(split_size, use_sourcelang,
+                                              use_image)
+        if use_sourcelang and use_image:  # where is image array in arrays.
+            img_idx = 2
+        else:
+            img_idx = 1
 
         d_idx = 0  # description index
         i_idx = 0  # image index
         for data_key in self.dataset[split]:
             ds = self.dataset[split][data_key]['descriptions']
             for description in ds:
-                dscrp_array[d_idx, :, :] = self.format_sequence(
-                    description.split())
-                img_array[d_idx, 0, :] = self.get_image_features(self.dataset,
-                    split, data_key)
-                if self.hsn:
-                  hsn_array[d_idx, 0, :] = self.get_hsn_features('val', data_key)
+                arrays[0][d_idx, :, :] = self.format_sequence(description.split())
+                if use_sourcelang:  # XXX ATTENTION this was originally self.hsn
+                    arrays[1][d_idx, 0, :] = self.get_hsn_features(split, data_key)
+                if use_image:
+                    # img_idx can be 1 or 2, depending on use_sourcelang
+                    arrays[img_idx][d_idx, 0, :] = self.get_image_features(
+                        self.dataset, split, data_key)
                 d_idx += 1
             i_idx += 1
             # This is a stupid way to break out of a nested for-loop
@@ -272,21 +295,16 @@ class VisualWordDataGenerator(object):
 
         if self.args_dict.small_val:
             # d_idx (number of descriptions before break) is new size.
-            dscrp_array,\
-            img_array,\
-            hsn_array = self.resize_arrays(d_idx, 
-                                           dscrp_array, 
-                                           img_array, 
-                                           hsn_array)
+            arrays = self.resize_arrays(d_idx, arrays)
 
-        targets = self.get_target_descriptions(dscrp_array)
+        targets = self.get_target_descriptions(arrays[0])
 
         logger.info("actual max_seq_len in split %s: %d",
                     split, self.actual_max_seq_len)
-        logger.info("dscrp_array size: %s", dscrp_array.shape)
+        logger.info("dscrp_array size: %s", arrays[0].shape)
         # TODO: truncate dscrp_array, img_array, targets
         # to actual_max_seq_len (+ padding)
-        return (dscrp_array, img_array, targets, hsn_array)
+        return (arrays, targets)
 
     def get_image_features_matrix(self, split):
         """ Creates the image features matrix/vector for a dataset split.
@@ -306,7 +324,8 @@ class VisualWordDataGenerator(object):
 
     def get_hsn_features(self, split, data_key):
         """ Return image features vector for split[data_key]."""
-        return floatX(self.source_dataset[split][data_key]['final_hidden_features'])
+        return floatX(self.source_dataset[split][data_key]
+                      ['final_hidden_features'])
 
     def get_image_features(self, dataset, split, data_key):
         """ Return image features vector for split[data_key]."""
@@ -320,8 +339,8 @@ class VisualWordDataGenerator(object):
         '''
         logger.info("Initialising vocabulary from pre-defined model")
         v = cPickle.load(open("%s/../vocabulary.pk" % path, "rb"))
-        self.index2word  = dict((v,k) for k,v in v.iteritems())
-        self.word2index  = dict((k,v) for k,v in v.iteritems())
+        self.index2word = dict((v, k) for k, v in v.iteritems())
+        self.word2index = dict((k, v) for k, v in v.iteritems())
         longest_sentence = 0
         # set the length of the longest sentence
         train_longest = self.find_longest_sentence('train')
@@ -412,7 +431,8 @@ class VisualWordDataGenerator(object):
 
         logger.info("Split sizes %s", self.split_sizes)
 
-        logger.info("Number of words %d -> %d", len(unk_dict), len(self.word2index))
+        logger.info("Number of words %d -> %d", len(unk_dict),
+                    len(self.word2index))
         logger.debug("word2index %s", self.word2index.items())
         logger.debug("Number of indices %d", len(self.index2word))
         logger.debug("index2word: %s", self.index2word.items())
@@ -446,9 +466,9 @@ class VisualWordDataGenerator(object):
             seq_array[time + 1, vocab] += 1
         # add EOS token at end of sentence
         assert time + 1 == len(w_indices),\
-                "time %d sequence %s len w_indices %d seq_array %s" % (
-                    time, " ".join([x for x in sequence]), len(w_indices), 
-                    seq_array)
+            "time %d sequence %s len w_indices %d seq_array %s" % (
+                time, " ".join([x for x in sequence]), len(w_indices),
+                seq_array)
         seq_array[len(w_indices) + 1, self.word2index[EOS]] += 1
         return seq_array
 

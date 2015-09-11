@@ -19,6 +19,9 @@ import models
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
+# How many descriptions to use for training if "--small" is set.
+SMALL_NUM_DESCRIPTIONS = 3000
+
 
 class VisualWordLSTM(object):
     """LSTM that combines visual features with textual descriptions.
@@ -38,10 +41,16 @@ class VisualWordLSTM(object):
             theano.config.optimizer = 'None'
             theano.config.exception_verbosity = 'high'
 
+        # consistent with models.py
+        self.use_sourcelang = args.source_vectors is not None
+        self.use_image = not args.mt_only
+
     def train_model(self):
         '''
-        In the model, we will merge the VGG image representation with
-        the word embeddings and the source-langauge multimodal vectors.
+        In the model, we will merge
+        the word embeddings with
+        the VGG image representation (if used)
+        and the source-language multimodal vectors (if used).
         We need to feed the data as a list, in which the order of the elements
         in the list is _crucial_.
         '''
@@ -49,65 +58,81 @@ class VisualWordLSTM(object):
         self.log_run_arguments()
         # Keras doesn't do batching of val set, so
         # assume val data is small enough to get all at once.
-        valX, valIX, valY, valS = self.data_generator.get_data_by_split('val')
+        # valX, valIX, valY, valS = self.data_generator.get_data_by_split('val')
+        # val_input is the list passed to model.fit()
+        # val_input can contain image, source features as well (or not)
+        val_input, valY = self.data_generator.get_data_by_split('val',
+            self.use_sourcelang, self.use_image)
+
+        if not self.use_sourcelang:
+            hsn_size = 0
+        else:
+            hsn_size = val_input[1].shape[2]  # ick
 
         if self.args.num_layers == 1:
             m = models.OneLayerLSTM(self.args.hidden_size, self.V,
                                     self.args.dropin,
                                     self.args.optimiser, self.args.l2reg,
-                                    hsn_size=valS.shape[2],
+                                    hsn_size=hsn_size,
                                     weights=self.args.init_from_checkpoint,
                                     gru=self.args.gru)
         else:
             m = models.TwoLayerLSTM(self.args.hidden_size, self.V,
                                     self.args.dropin, self.args.droph,
                                     self.args.optimiser, self.args.l2reg,
-                                    hsn_size=valS.shape[2],
+                                    hsn_size=hsn_size,
                                     weights=self.args.init_from_checkpoint)
 
-        model = m.buildKerasModel(hsn=self.args.source_vectors is not None)
+        model = m.buildKerasModel(use_sourcelang=self.use_sourcelang,
+                                  use_image=self.use_image)
 
         callbacks = CompilationOfCallbacks(self.data_generator.word2index,
                                            self.data_generator.index2word,
                                            self.args,
-                                           self.args.dataset)
+                                           self.args.dataset,
+                                           use_sourcelang=self.use_sourcelang,
+                                           use_image=self.use_image)
 
-        if self.args.big_batch_size > 0:
-            batches = ceil(float(self.data_generator.split_sizes['train']) /
-                           self.args.big_batch_size)
+        big_batch_size = self.args.big_batch_size
+        if big_batch_size > 0:
+            if self.args.small:
+                batches = ceil(SMALL_NUM_DESCRIPTIONS/self.args.big_batch_size)
+            else:
+                batches = ceil(float(self.data_generator.split_sizes['train']) /
+                               self.args.big_batch_size)
             batches = int(batches)
-            for epoch in range(self.args.epochs):
-                batch = 1
-                for trainX, trainIX, trainY, trainS, indicator in self.data_generator.yield_training_batch():
-                    logger.info("Epoch %d/%d, big-batch %d/%d", epoch+1,
-                                self.args.epochs, batch, batches)
+        else:  # if big_batch_size == 0, reset to training set size.
+            big_batch_size = self.data_generator.split_sizes['train']
+            batches = 1
 
-                    if indicator is True:
-                        # let's test on the val after training on these batches
-                        model.fit([trainX, trainS, trainIX] if
-                                  self.args.source_vectors is not None else
-                                  [trainX, trainIX],
-                                  trainY,
+        for epoch in range(self.args.epochs):
+            batch = 1
+            # for trainX, trainIX, trainY, trainS, indicator in self.data_generator.yield_training_batch():
+            for train_input, trainY, indicator in\
+                self.data_generator.yield_training_batch(big_batch_size,
+                                                         self.use_sourcelang,
+                                                         self.use_image):
 
-                                  validation_data=([valX, valS, valIX] if
-                                  self.args.source_vectors is not None else
-                                  [valX, valIX], valY),
+                logger.info("Epoch %d/%d, big-batch %d/%d", epoch+1,
+                            self.args.epochs, batch, batches)
 
-                                  nb_epoch=1,
-                                  callbacks=[callbacks],
-                                  verbose=1,
-                                  batch_size=self.args.batch_size,
-                                  shuffle=True)
-                    else:
-                        model.fit([trainX, trainS, trainIX] if
-                                  self.args.source_vectors is not None else
-                                  [trainX, trainIX],
-                                  trainY,
-                                  nb_epoch=1,
-                                  verbose=1,
-                                  batch_size=self.args.batch_size,
-                                  shuffle=True)
-                    batch += 1
+                if indicator is True:
+                    # let's test on the val after training on these batches
+                    model.fit(train_input,
+                              trainY,
+                              validation_data=(val_input, valY),
+                              callbacks=[callbacks],
+                              verbose=1,
+                              batch_size=self.args.batch_size,
+                              shuffle=True)
+                else:
+                    model.fit(train_input,
+                              trainY,
+                              nb_epoch=1,
+                              verbose=1,
+                              batch_size=self.args.batch_size,
+                              shuffle=True)
+                batch += 1
 
     def log_run_arguments(self):
         '''
@@ -138,7 +163,20 @@ if __name__ == "__main__":
     parser.add_argument("--num_sents", default=5, type=int,
                         help="Number of descriptions/image for training")
     parser.add_argument("--small_val", action="store_true",
-                        help="Validate on 100 images. Useful for speed")
+                        help="Validate on 100 images. Useful for speed/memory")
+
+    # These options turn off image or source language inputs.
+    # Image data is *always* included in the hdf5 dataset, even if --mt_only
+    # is set.
+    parser.add_argument("--mt_only", action="store_true",
+                        help="Do not use image data: MT baseline.")
+    # If --source_vectors = None: model uses only visual/image input, no
+    # source language/encoder hidden layer representation feature vectors.
+    parser.add_argument("--source_vectors", default=None, type=str,
+                        help="Path to final hidden representations of\
+                        encoder/source language VisualWordLSTM model.\
+                        (default: None.) Expects a final_hidden_representation\
+                        vector for each image in the dataset")
 
     parser.add_argument("--dataset", default="", type=str, help="Path to the\
                         HDF5 dataset to use for training / val input\
@@ -149,7 +187,7 @@ if __name__ == "__main__":
 
     parser.add_argument("--big_batch_size", default=1000, type=int,
                         help="Number of examples to load from disk at a time;\
-                        0 (default) loads entire dataset")
+                        0 loads entire dataset. Default is 1000")
 
     parser.add_argument("--epochs", default=50, type=int)
     parser.add_argument("--batch_size", default=100, type=int)
@@ -181,10 +219,6 @@ if __name__ == "__main__":
     parser.add_argument("--generation_timesteps", default=10, type=int,
                         help="Maximum number of words to generate for unseen\
                         data (default=10).")
-    parser.add_argument("--source_vectors", default=None, type=str,
-                        help="Path to final hidden representations. (default:\
-                        None.) Expects a final_hidden_representation vector\
-                        for each image in the dataset")
     parser.add_argument("--h5_writeable", action="store_true",
                         help="Open the H5 file for write-access? Useful for\
                         serialising hidden states to disk. (default = False)")
