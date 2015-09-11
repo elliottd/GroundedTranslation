@@ -37,13 +37,14 @@ class VisualWordLSTM(object):
 
         self.V = self.data_generator.get_vocab_size()
 
+        # consistent with models.py
+        self.use_sourcelang = args.source_vectors is not None
+        self.use_image = not args.mt_only
+
         if self.args.debug:
             theano.config.optimizer = 'None'
             theano.config.exception_verbosity = 'high'
 
-        # consistent with models.py
-        self.use_sourcelang = args.source_vectors is not None
-        self.use_image = not args.mt_only
 
     def train_model(self):
         '''
