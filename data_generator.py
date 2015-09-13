@@ -93,8 +93,8 @@ class VisualWordDataGenerator(object):
                                             % self.args_dict.source_vectors,
                                             "r")
 #           self.hsn = True
-#           self.hsn_size = len(self.source_dataset['train']['000000']
-#                               ['final_hidden_features'])
+            self.hsn_size = len(self.source_dataset['train']['000000']
+                                ['final_hidden_features'])
 #       logger.info("Sourcelang/HSN input: %s, size %d", self.hsn,
 #                       self.hsn_size)
 

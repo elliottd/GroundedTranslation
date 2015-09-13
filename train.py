@@ -31,12 +31,6 @@ class VisualWordLSTM(object):
     def __init__(self, args):
         self.args = args
 
-        self.data_generator = VisualWordDataGenerator(
-            self.args, self.args.dataset)
-        self.data_generator.extract_vocabulary()
-
-        self.V = self.data_generator.get_vocab_size()
-
         # consistent with models.py
         self.use_sourcelang = args.source_vectors is not None
         self.use_image = not args.mt_only
@@ -57,6 +51,13 @@ class VisualWordLSTM(object):
         '''
 
         self.log_run_arguments()
+
+        self.data_generator = VisualWordDataGenerator(
+            self.args, self.args.dataset)
+        self.data_generator.extract_vocabulary()
+
+        self.V = self.data_generator.get_vocab_size()
+
         # Keras doesn't do batching of val set, so
         # assume val data is small enough to get all at once.
         # valX, valIX, valY, valS = self.data_generator.get_data_by_split('val')
@@ -123,6 +124,7 @@ class VisualWordLSTM(object):
                               trainY,
                               validation_data=(val_input, valY),
                               callbacks=[callbacks],
+                              nb_epoch=1,
                               verbose=1,
                               batch_size=self.args.batch_size,
                               shuffle=True)
