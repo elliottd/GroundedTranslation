@@ -63,8 +63,9 @@ class VisualWordLSTM(object):
         # valX, valIX, valY, valS = self.data_generator.get_data_by_split('val')
         # val_input is the list passed to model.fit()
         # val_input can contain image, source features as well (or not)
-        val_input, valY = self.data_generator.get_data_by_split('val',
-            self.use_sourcelang, self.use_image)
+        if not self.args.enable_val_pplx:
+            val_input, valY = self.data_generator.get_data_by_split('val',
+                              self.use_sourcelang, self.use_image)
 
         if not self.use_sourcelang:
             hsn_size = 0
@@ -92,6 +93,7 @@ class VisualWordLSTM(object):
                                            self.data_generator.index2word,
                                            self.args,
                                            self.args.dataset,
+                                           self.data_generator,
                                            use_sourcelang=self.use_sourcelang,
                                            use_image=self.use_image)
 
@@ -122,7 +124,9 @@ class VisualWordLSTM(object):
                     # let's test on the val after training on these batches
                     model.fit(train_input,
                               trainY,
-                              validation_data=(val_input, valY),
+                              validation_data=None if
+                              self.args.enable_val_pplx else
+                              (val_input, valY),
                               callbacks=[callbacks],
                               nb_epoch=1,
                               verbose=1,
@@ -160,6 +164,11 @@ if __name__ == "__main__":
     parser.add_argument("--init_from_checkpoint", help="Initialise the model\
                         parameters from a pre-defined checkpoint? Useful to\
                         continue training a model.", default=None, type=str)
+    parser.add_argument("--enable_val_pplx", action="store_true",
+                        default=True,
+                        help="Calculate and report smoothed validation pplx\
+                        instead of Keras objective function loss. Turns off\
+                        calculation of Keras val loss. (default=true)")
 
     parser.add_argument("--small", action="store_true",
                         help="Run on 100 images. Useful for debugging")

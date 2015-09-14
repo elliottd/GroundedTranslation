@@ -7,7 +7,6 @@ import theano
 import argparse
 import itertools
 import subprocess
-import math
 import logging
 import time
 import codecs
@@ -57,8 +56,10 @@ class VisualWordLSTM:
         self.index2word = self.data_gen.index2word
         self.word2index = self.data_gen.word2index
 
-        X, IX, Y, S = self.data_gen.get_data_by_split("val")
-        self.hsn_size = S.shape[2]
+        val_input, valY = self.data_gen.get_data_by_split("val")
+        X = val_input[0]
+        Y = valY
+        self.hsn_size = val_input[1].shape[2]  # ick
 
         m = models.OneLayerLSTM(self.args.hidden_size, self.vocab_len,
                                 self.args.dropin,
@@ -69,6 +70,7 @@ class VisualWordLSTM:
         self.model = m.buildKerasModel(self.args.source_vectors is not None)
 
         self.generate_sentences(self.args.checkpoint)
+        self.calculate_pplx(X, Y)
         self.bleu_score(self.args.checkpoint)
 
     def yield_chunks(self, split_indices, batch_size):

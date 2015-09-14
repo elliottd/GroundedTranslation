@@ -14,7 +14,8 @@ import shutil
 import codecs
 import sys
 from time import gmtime, strftime
-
+import math
+import time
 
 # Set up logger
 logging.basicConfig(level=logging.INFO)
@@ -29,7 +30,7 @@ class CompilationOfCallbacks(Callback):
     """ Collection of compiled callbacks."""
 
     def __init__(self, word2index, index2word, argsDict, dataset,
-                 use_sourcelang=False, use_image=True):
+                 data_generator, use_sourcelang=False, use_image=True):
         super(Callback, self).__init__()
 
         self.verbose = True
@@ -38,6 +39,9 @@ class CompilationOfCallbacks(Callback):
 
         self.val_loss = []
         self.best_val_loss = np.inf
+
+        self.val_pplx = []
+        self.best_val_pplx = np.inf
 
         self.val_bleu = []
         self.best_val_bleu = np.NINF
@@ -49,6 +53,10 @@ class CompilationOfCallbacks(Callback):
         # needed by model.predict in generate_sentences
         self.use_sourcelang = use_sourcelang
         self.use_image = use_image
+
+        # controversial assignment but it makes it much easier to 
+        # perform pplx calculations
+        self.data_generator = data_generator
 
         # this results in two file handlers for dataset (here and
         # data_generator)
@@ -76,27 +84,59 @@ class CompilationOfCallbacks(Callback):
         # Generate training and val sentences to check for overfitting
         # self.generate_sentences(path, val=False)
         # bleu = self.__bleu_score__(path, val=False)
+        if self.args.enable_val_pplx:
+            val_pplx = self.calculate_pplx()
         self.generate_sentences(path)
         val_bleu = self.__bleu_score__(path)
 
-        self.checkpoint_parameters(epoch, logs, path, val_bleu)
+        self.checkpoint_parameters(epoch, logs, path, val_bleu, val_pplx)
 
     def on_train_end(self, logs={}):
+        '''
+        Record model performance so far, based on whether we are tracking
+        validation loss or validation pplx.
+        '''
         handle = open("checkpoints/%s/summary" % self.args.run_string, "w")
         logger.info("Training complete")
         handle.write("Training complete \n")
-        for epoch in range(len(self.val_loss)):
-            logger.info("Checkpoint %d | val loss: %.5f bleu %.2f",
-                        epoch+1, self.val_loss[epoch], self.val_bleu[epoch])
-            handle.write("Checkpoint %d | val loss: %.5f bleu %.2f\n"
-                         % (epoch+1, self.val_loss[epoch],
-                            self.val_bleu[epoch]))
 
+        for epoch in range(len(self.val_pplx)):
+            if self.args.enable_val_pplx:
+                if epoch == 0:
+                    smooth_pplx = self.val_pplx[epoch]
+                else:
+                    # Exponential moving average of PPLX
+                    # https://en.wikipedia.org/wiki/Exponential_smoothing
+                    smooth_pplx = 0.99 * smooth_pplx\
+                        + 0.01 * self.val_pplx[epoch]
+
+                logger.info("Checkpoint %d | val pplx: %.5f smooth: %.5f bleu %.2f",
+                            epoch+1, self.val_pplx[epoch], smooth_pplx,
+                            self.val_bleu[epoch])
+                handle.write("Checkpoint %d | val pplx: %.5f\
+                              smoothed: %.5f bleu %.2f\n"
+                             % (epoch+1, self.val_pplx[epoch], smooth_pplx,
+                                self.val_bleu[epoch]))
+            else:
+                logger.info("Checkpoint %d | val loss: %.5f bleu %.2f",
+                            epoch+1, self.val_loss[epoch],
+                            self.val_bleu[epoch])
+                handle.write("Checkpoint %d | val loss: %.5f bleu %.2f\n"
+                             % (epoch+1, self.val_loss[epoch],
+                                self.val_bleu[epoch]))
+
+        # BLEU is the quickest indicator of performance for our task
         best = np.nanargmax(self.val_bleu)
-        logger.info("Best checkpoint: %d | val loss %.5f bleu %.2f", best+1,
-                    self.val_loss[best], self.val_bleu[best])
-        handle.write("Best checkpoint: %d | val loss %.5f bleu %.2f" % (best+1,
-                     self.val_loss[best], self.val_bleu[best]))
+        if self.args.enable_val_pplx:
+            logger.info("Best checkpoint: %d | val pplx %.5f bleu %.2f",
+                        best+1, self.val_pplx[best], self.val_bleu[best])
+            handle.write("Best checkpoint: %d | val pplx %.5f bleu %.2f"
+                         % (best+1, self.val_pplx[best], self.val_bleu[best]))
+        else:
+            logger.info("Best checkpoint: %d | val loss %.5f bleu %.2f",
+                        best+1, self.val_loss[best], self.val_bleu[best])
+            handle.write("Best checkpoint: %d | val loss %.5f bleu %.2f"
+                         % (best+1, self.val_loss[best], self.val_bleu[best]))
         handle.close()
 
     def extract_references(self, directory, val=True):
@@ -180,7 +220,8 @@ class CompilationOfCallbacks(Callback):
             handle.write("%s: %s\n" % (arg, str(value)))
         handle.close()
 
-    def checkpoint_parameters(self, epoch, logs, filepath, cur_val_bleu):
+    def checkpoint_parameters(self, epoch, logs, filepath, cur_val_bleu,
+                              cur_val_pplx=0.):
         '''
         We checkpoint the model parameters based on either PPLX reduction or
         BLEU score increase in the validation data. This is driven by the
@@ -191,41 +232,29 @@ class CompilationOfCallbacks(Callback):
 
         if self.save_best_only and self.params['do_validation']:
             cur_val_loss = logs.get('val_loss')
+            self.val_loss.append(cur_val_loss)
+            if cur_val_loss < self.best_val_loss:
+                self.best_val_loss = cur_val_loss
 
             logger.info("Checkpoint %d: | val loss %0.5f (best: %0.5f) bleu\
                         %0.2f (best %0.2f)", (len(self.val_loss) + 1),
                         cur_val_loss, self.best_val_loss, cur_val_bleu,
                         self.best_val_bleu)
 
-            self.val_loss.append(cur_val_loss)
-            self.val_bleu.append(cur_val_bleu)
-
-        if self.args.stopping_loss == 'model':
-            if cur_val_loss < self.best_val_loss:
-                logger.debug("Saving model because val loss decreased")
-                self.model.save_weights(weights_path, overwrite=True)
-
-        elif self.args.stopping_loss == 'bleu':
-            if cur_val_bleu > self.best_val_bleu:
-                logger.debug("Saving model because bleu increased")
-                self.model.save_weights(weights_path, overwrite=True)
-
-        elif self.save_best_only and not self.params['do_validation']:
-            logger.warn("Can save best model only with val data, skipping")
-            warnings.warn("Can save best model only with val data, skipping",
-                          RuntimeWarning)
-
-        elif not self.save_best_only:
-            if self.verbose > 0:
-                logger.debug("Checkpoint %d: saving model", epoch)
-            self.model.save_weights(weights_path, overwrite=True)
+        if self.args.enable_val_pplx:
+            logger.info("Checkpoint %d: | val pplx %0.5f (best: %0.5f) bleu\
+                        %0.2f (best %0.2f)", (len(self.val_pplx) + 1),
+                        cur_val_pplx, self.best_val_pplx, cur_val_bleu,
+                        self.best_val_bleu)
+            self.val_pplx.append(cur_val_pplx)
+            if cur_val_pplx < self.best_val_pplx:
+                self.best_val_pplx = cur_val_pplx
 
         # save the weights anyway for debug purposes
         self.model.save_weights(weights_path, overwrite=True)
 
         # update the best values, if applicable
-        if cur_val_loss < self.best_val_loss:
-            self.best_val_loss = cur_val_loss
+        self.val_bleu.append(cur_val_bleu)
         if cur_val_bleu > self.best_val_bleu:
             self.best_val_bleu = cur_val_bleu
 
@@ -341,3 +370,84 @@ class CompilationOfCallbacks(Callback):
                                        lambda n: n != "<E>", s[1:])]) + "\n")
 
         handle.close()
+
+    def calculate_pplx(self, val=True):
+        '''
+        Calculcates the PPLX of the model, given the gold-standard
+        validation data. PPLX is calculated over X_true and Y_true until
+        we hit batch-length padding <P> in X_true.
+        '''
+
+        prefix = "val" if val else "test"
+        logger.info("Calculating pplx over %s data", prefix)
+        complete_logprobs = []
+        complete_len = 0
+        input_data, Y_true = self.data_generator.get_data_by_split(prefix,
+                                       self.use_sourcelang, self.use_image)
+        X_true = input_data[0]
+        max_timesteps = Y_true.shape[1]
+
+        for indices in self.yield_chunks(range(len(X_true)),
+                                         self.args.batch_size):
+            start = indices[0]
+            end = indices[-1]
+
+            if self.args.debug:
+                btic = time.time()
+
+            logprobs = [[] for _ in range(len(indices))]
+            batch_Y = Y_true[start:end+1]
+            batch_len = 0
+
+            # prepare the datastructures
+            sents = X_true[start:end+1]
+            vfeats = np.zeros((len(indices),
+                               max_timesteps,
+                               IMG_FEATS))
+            if self.args.source_vectors is not None:
+                sfeats = np.zeros((len(indices),
+                                   max_timesteps,
+                                   self.hsn_size))
+            idx = 0
+            h5items = self.dataset[prefix].keys()
+            # populate the datastructures from the h5
+            for data_key in h5items[start:end]:
+                # vfeats at time=0 only to avoid overfitting
+                vfeats[idx, 0] = self.dataset[prefix][data_key]\
+                                             ['img_feats'][:]
+                if self.args.source_vectors is not None:
+                    sfeats[idx, 0] = self.data_gen.source_dataset[prefix][data_key]\
+                                          ['final_hidden_features'][:]
+                idx += 1
+
+            if self.args.debug:
+                tic = time.time()
+
+            preds = self.model.predict([sents, sfeats, vfeats] if
+                                       self.args.source_vectors is not None
+                                       else [sents, vfeats],
+                                       verbose=0)
+            if self.args.debug:
+                logger.info("Forward pass took %f", time.time()-tic)
+
+            for t in range(max_timesteps):
+                for i in range(len(indices)):
+                    target_idx = np.argmax(batch_Y[i, t])
+                    if self.index2word[target_idx] != "<P>":
+                        logprobs[i].append(preds[i, t, target_idx])
+                        batch_len += 1
+
+            complete_logprobs.append(logprobs[:])
+            complete_len += batch_len
+
+            if self.args.debug:
+                logger.info("Batch took %f s", time.time()-btic)
+
+        logprob = -sum([math.log(a, 2) for b in
+                       itertools.chain.from_iterable(complete_logprobs)
+                       for a in b])
+        norm_logprob = logprob / complete_len
+        pplx = math.pow(2, norm_logprob)
+        logger.info("logprob %f",  norm_logprob)
+        logger.info("pplx %f", pplx)
+        return pplx
