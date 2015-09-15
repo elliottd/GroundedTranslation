@@ -70,7 +70,7 @@ class VisualWordLSTM(object):
         if not self.use_sourcelang:
             hsn_size = 0
         else:
-            hsn_size = val_input[1].shape[2]  # ick
+            hsn_size = self.data_generator.hsn_size  # ick
 
         if self.args.num_layers == 1:
             m = models.OneLayerLSTM(self.args.hidden_size, self.V,
