@@ -27,6 +27,7 @@ IMG_FEATS = 4096
 
 # How many descriptions to use for training if "--small" is set.
 SMALL_NUM_DESCRIPTIONS = 3000
+SMALL_VAL = 100
 
 
 class VisualWordDataGenerator(object):
@@ -85,18 +86,14 @@ class VisualWordDataGenerator(object):
         self.datasets.append(self.dataset)
 
         # hsn doesn't have to be a class variable.
-#       self.hsn = False
-#       self.hsn_size = 0 # set to 0 or a value explictly.
         # what happens if self.hsn is false but hsn_size is not zero?
         if self.args_dict.source_vectors is not None:
             self.source_dataset = h5py.File("%s/dataset.h5"
                                             % self.args_dict.source_vectors,
                                             "r")
-#           self.hsn = True
             self.hsn_size = len(self.source_dataset['train']['000000']
                                 ['final_hidden_features'])
-#       logger.info("Sourcelang/HSN input: %s, size %d", self.hsn,
-#                       self.hsn_size)
+            logger.info("Available sourcelang/HSN input: size %d", self.hsn_size)
 
         # These variables are filled by extract_vocabulary
         self.word2index = dict()
@@ -143,15 +140,20 @@ class VisualWordDataGenerator(object):
 
         arrays = self.get_new_training_arrays(big_batch_size,
                                               use_sourcelang, use_image)
-        num_descriptions = 0  # indexing descriptions found so far
+        num_descriptions = 0  # total num descriptions found so far.
         batch_max_seq_len = 0
-        filled_counter = 0  # we resize the arrays for the final batch
         if use_sourcelang and use_image:  # where is image array in arrays.
             img_idx = 2
         else:
             img_idx = 1
         # Iterate over *images* in training splits
         for dataset in self.datasets:
+            #training_size = self.split_sizes['train'] # this won't work with multiple datasets
+            training_size = len(dataset['train'])
+            logging.info("training size %d", training_size)
+            if self.small:
+                training_size = SMALL_NUM_DESCRIPTIONS
+
             for data_key in dataset['train']:
                 ds = dataset['train'][data_key]['descriptions'][0:self.args_dict.num_sents]
                 for description in ds:
@@ -163,52 +165,58 @@ class VisualWordDataGenerator(object):
                         for i, arr in enumerate(arrays):
                             arrays[i] = arr[:, :(batch_max_seq_len + 3), :]
                         targets = self.get_target_descriptions(arrays[0])
-                        yield (arrays, targets,
-                               filled_counter == self.split_sizes['train'])
+
+                        yield (arrays, targets, num_descriptions == training_size)
 
                         # Testing multiple big batches
-                        if self.small and num_descriptions > SMALL_NUM_DESCRIPTIONS:
+                        if self.small and num_descriptions >= training_size:
                             logger.warn("Breaking out of yield_training_batch")
-                            break
+                            raise StopIteration
 
-                        arrays = self.get_new_training_arrays(
-                            big_batch_size, use_sourcelang, use_image)
-                        filled_counter = 0
-
-                    # Breaking out of nested loop (braindead)
-                    # TODO: replace this with an exception
-                    if self.small and num_descriptions > SMALL_NUM_DESCRIPTIONS:
-                        break
+                        # Create new training arrays that are either
+                        # big_batch_size or the size of the number of
+                        # descriptions left
+                        this_bbs = big_batch_size
+                        if (training_size - num_descriptions) < big_batch_size:
+                            this_bbs = training_size - num_descriptions
+                            logger.info("Creating (truncated) final big batch, size %d", this_bbs)
+                        arrays = self.get_new_training_arrays(this_bbs,
+                                                              use_sourcelang, use_image)
 
                     if len(description.split()) > batch_max_seq_len:
                         batch_max_seq_len = len(description.split())
-                    try:
-                        # arrays[0] is dscrp_array
-                        arrays[0][batch_index, :, :] = self.format_sequence(
-                            description.split())
-                        if use_sourcelang:
-                            arrays[1][batch_index, 0, :] =\
-                                self.get_hsn_features('train', data_key)
-                        if use_image:
-                            # img_idx is 1 or 2, depending on use_sourcelang
-                            arrays[img_idx][batch_index, 0, :] =\
-                                self.get_image_features(dataset, 'train', data_key)
-                        num_descriptions += 1
-                        filled_counter += 1
-                    except AssertionError:  # where is this from?
-                        continue
 
-                # Breaking out of nested loop (braindead)
-                if self.small and num_descriptions > SMALL_NUM_DESCRIPTIONS:
-                    break
+                    #try:
+                    # arrays[0] is dscrp_array
+                    arrays[0][batch_index, :, :] = self.format_sequence(
+                        description.split())
+                    if use_sourcelang:
+                        arrays[1][batch_index, 0, :] =\
+                            self.get_hsn_features('train', data_key)
+                    if use_image:
+                        # img_idx is 1 or 2, depending on use_sourcelang
+                        arrays[img_idx][batch_index, 0, :] =\
+                            self.get_image_features(dataset, 'train', data_key)
+                    num_descriptions += 1
+                    #except AssertionError:  # where is this from?
+                    #    continue
+
 
             # End of looping through a dataset (may be one of many).
             # Yield final batch for this dataset.
             # batch_index is not guaranteed to modulo zero on the
             # final big_batch. This if statement catches that and
             # resizes the final yielded dscrp/img_array and targets
-            if filled_counter != big_batch_size:
-                arrays = self.resize_arrays(filled_counter, arrays)
+            batch_index = num_descriptions % big_batch_size
+#           if batch_index != 0:
+#               logging.warn("resizing final batch", batch_index,
+#                            num_descriptions)
+#               arrays = self.resize_arrays(batch_index, arrays)
+            assert batch_index == arrays[0].shape[0],\
+                    "Filled array %d, size %d" % (batch_index, arrays[0].shape[0])
+            assert num_descriptions == training_size,\
+                    "Yielded %d descriptions, train size %d (%d)" % (
+                        num_descriptions,  training_size, self.split_sizes['train'])
 
             # Return (filled) big_batch array
             # Truncate descriptions to max length of batch (plus
@@ -216,6 +224,7 @@ class VisualWordDataGenerator(object):
             for i, arr in enumerate(arrays):
                 arrays[i] = arr[:, :(batch_max_seq_len + 3), :]
             targets = self.get_target_descriptions(arrays[0])
+            # this will do validataion at the end of every training dataset (in supertraining)
             yield (arrays, targets, True)
             # For next dataset (i.e. if supertraining)
             arrays = self.get_new_training_arrays(
@@ -227,6 +236,7 @@ class VisualWordDataGenerator(object):
         Resize all the arrays to new_size along dimension 0.
         Sometimes we need to initialise a np.zeros() to an arbitrary size
         and then cut it down to out intended new_size.
+        Now used only with small_val.
         """
         logger.info("Resizing batch_size in structures from %d -> %d",
                     arrays[0].shape[0], new_size)
@@ -235,6 +245,22 @@ class VisualWordDataGenerator(object):
             arrays[i] = np.resize(array, (new_size, array.shape[1],
                                           array.shape[2]))
         return arrays
+
+    def get_refs_by_split_as_list(self, split):
+        """ Replaces extract_references in Callbacks."""
+
+        # Doesn't work for train because of size/batching, also not needed.
+        assert split in ['test', 'val'], "Not possible for split %s" % split
+        references = []
+        for data_key in self.dataset[split]:
+            this_image = []
+            for descr in self.dataset[split][data_key]['descriptions']:
+                this_image.append(descr)
+            references.append(this_image)
+            if self.args_dict.small_val and split == 'val':
+                if len(references) >= SMALL_VAL:
+                    break
+        return references
 
     def get_data_by_split(self, split, use_sourcelang=False, use_image=True):
         """ Gets all input data for model for a given split (ie. train, val,
@@ -264,9 +290,9 @@ class VisualWordDataGenerator(object):
         split_size = self.split_sizes[split]
         intended_size = np.inf
         if self.args_dict.small_val:
-            intended_size = 100
+            intended_size = SMALL_VAL
             # Make split_size comfortably bigger than intended_size
-            split_size = 200 * self.args_dict.num_sents
+            split_size = 2 * SMALL_VAL * self.args_dict.num_sents
 
         arrays = self.get_new_training_arrays(split_size, use_sourcelang,
                                               use_image)
@@ -276,7 +302,6 @@ class VisualWordDataGenerator(object):
             img_idx = 1
 
         d_idx = 0  # description index
-        i_idx = 0  # image index
         for data_key in self.dataset[split]:
             ds = self.dataset[split][data_key]['descriptions']
             for description in ds:
@@ -288,9 +313,7 @@ class VisualWordDataGenerator(object):
                     arrays[img_idx][d_idx, 0, :] = self.get_image_features(
                         self.dataset, split, data_key)
                 d_idx += 1
-            i_idx += 1
-            # This is a stupid way to break out of a nested for-loop
-            if i_idx >= intended_size:
+            if d_idx >= intended_size:
                 break
 
         if self.args_dict.small_val:
@@ -299,9 +322,9 @@ class VisualWordDataGenerator(object):
 
         targets = self.get_target_descriptions(arrays[0])
 
-        logger.info("actual max_seq_len in split %s: %d",
+        logger.debug("actual max_seq_len in split %s: %d",
                     split, self.actual_max_seq_len)
-        logger.info("dscrp_array size: %s", arrays[0].shape)
+        logger.debug("dscrp_array size: %s", arrays[0].shape)
         # TODO: truncate dscrp_array, img_array, targets
         # to actual_max_seq_len (+ padding)
         return (arrays, targets)
@@ -353,14 +376,15 @@ class VisualWordDataGenerator(object):
         logger.info("Split sizes %s", self.split_sizes)
 
         logger.info("Number of words in vocabulary %d", len(self.word2index))
-        logger.debug("word2index %s", self.word2index.items())
+        #logger.debug("word2index %s", self.word2index.items())
         logger.debug("Number of indices %d", len(self.index2word))
-        logger.debug("index2word: %s", self.index2word.items())
+        #logger.debug("index2word: %s", self.index2word.items())
 
     def find_longest_sentence(self, split):
         '''
         Calculcates the length of the longest sentence in a given split of
         a dataset and updates the number of sentences in a split.
+        TODO: can we get split_sizes from H5 dataset indices directly?
         '''
         longest_sentence = 0
         for dataset in self.datasets:
@@ -433,9 +457,9 @@ class VisualWordDataGenerator(object):
 
         logger.info("Number of words %d -> %d", len(unk_dict),
                     len(self.word2index))
-        logger.debug("word2index %s", self.word2index.items())
-        logger.debug("Number of indices %d", len(self.index2word))
-        logger.debug("index2word: %s", self.index2word.items())
+        #logger.debug("word2index %s", self.word2index.items())
+        #logger.debug("Number of indices %d", len(self.index2word))
+        #logger.debug("index2word: %s", self.index2word.items())
 
     def vectorise_image_descriptions(self, image, index, description_array):
         """ Update description_array with descriptions belonging to image.

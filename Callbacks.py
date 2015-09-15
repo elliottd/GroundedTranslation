@@ -1,6 +1,7 @@
 """
 Module to do callbacks for Keras models.
 """
+from __future__ import division
 
 from keras.callbacks import Callback  # ModelCheckpoint , EarlyStopping
 
@@ -18,7 +19,8 @@ import math
 import time
 
 # Set up logger
-logging.basicConfig(level=logging.INFO)
+#logging.basicConfig(level=logging.INFO)
+logging.basicConfig(level=logging.DEBUG)
 logger = logging.getLogger(__name__)
 
 # Dimensionality of image feature vector
@@ -54,7 +56,7 @@ class CompilationOfCallbacks(Callback):
         self.use_sourcelang = use_sourcelang
         self.use_image = use_image
 
-        # controversial assignment but it makes it much easier to 
+        # controversial assignment but it makes it much easier to
         # perform pplx calculations
         self.data_generator = data_generator
 
@@ -139,32 +141,17 @@ class CompilationOfCallbacks(Callback):
                          % (best+1, self.val_loss[best], self.val_bleu[best]))
         handle.close()
 
-    def extract_references(self, directory, val=True):
+    def extract_references(self, directory, split):
         """
-        Get reference descriptions for val, or test data.
+        Get reference descriptions for val or test data.
         """
-        references = []
-
-        if val:
-            for data_key in self.dataset['val']:
-                this_image = []
-                for descr in self.dataset['val'][data_key]['descriptions']:
-                    this_image.append(descr)
-                references.append(this_image)
-                if self.args.small_val:
-                    if len(references) >= 100:
-                        break
-        else:
-            for data_key in self.dataset['test']:
-                this_image = []
-                for descr in self.dataset['test'][data_key]['descriptions']:
-                    this_image.append(descr)
-                references.append(this_image)
+        references = self.data_generator.get_refs_by_split_as_list(split)
 
         for refid in xrange(len(references[0])):
-            codecs.open('%s/%s_reference.ref%d' % (directory,
-                                                   "val" if val else "train", refid),
-                        'w', 'utf-8').write('\n'.join([x[refid] for x in references]))
+            codecs.open('%s/%s_reference.ref%d' % (directory, split, refid),
+                        #'w', 'utf-8').write('\n'.join([x[refid] for x in references]))
+                        'w', 'utf-8').write('\n'.join(['\n'.join(x) for x in references]))
+
 
     def __bleu_score__(self, directory, val=True):
         '''
@@ -176,7 +163,7 @@ class CompilationOfCallbacks(Callback):
 
         prefix = "val" if val else "test"
 
-        self.extract_references(directory, val)
+        self.extract_references(directory, split=prefix)
 
         subprocess.check_call(
             ['perl multi-bleu.perl %s/%s_reference.ref < %s/%sGenerated > %s/%sBLEU'
@@ -263,47 +250,50 @@ class CompilationOfCallbacks(Callback):
             optimiser_params.write("%s: %s\n" % (key, value))
         optimiser_params.close()
 
-    def yield_chunks(self, split_indices, batch_size):
+    def yield_chunks(self, len_split_indices, batch_size):
         '''
         self.args.batch_size is not always cleanly divisible by the number of
         items in the split, so we need to always yield the correct number of
         items.
         '''
-        for i in xrange(0, len(split_indices), batch_size):
-            yield split_indices[i:i+batch_size]
+        for i in xrange(0, len_split_indices, batch_size):
+            #yield split_indices[i:i+batch_size]
+            yield (i, i+batch_size-1)
 
     def make_generation_arrays(self, array_size, prefix, start, end):
-
-            arrays = []
-            img_idx = 1
-            # descriptions/sents
+        """Create arrays that are used as input for generation. """
+        arrays = []
+        img_idx = 1
+        # descriptions/sents
+        arrays.append(np.zeros((array_size,
+                                self.args.generation_timesteps+1,
+                                len(self.word2index))))
+        if self.use_sourcelang:
+            num_source_feats = len(self.source_dataset['train']['000000']
+                                   ['final_hidden_features'][:])
+            arrays.append(np.zeros((array_size,
+                                   self.args.generation_timesteps+1,
+                                    num_source_feats)))
+            img_idx += 1  # image features at array[2]
+        if self.use_image:
             arrays.append(np.zeros((array_size,
                                     self.args.generation_timesteps+1,
-                                    len(self.word2index))))
-            if self.use_sourcelang:
-                num_source_feats = len(self.source_dataset['train']['000000']
-                                       ['final_hidden_features'][:])
-                arrays.append(np.zeros((array_size,
-                                       self.args.generation_timesteps+1,
-                                        num_source_feats)))
-                img_idx += 1  # image features at array[2]
-            if self.use_image:
-                arrays.append(np.zeros((array_size,
-                                        self.args.generation_timesteps+1,
-                                        IMG_FEATS)))
+                                    IMG_FEATS)))
 
-            # populate the datastructures from the h5
-            idx = 0
-            h5items = self.dataset[prefix].keys()
-            for data_key in h5items[start:end]:
-                arrays[0][idx, 0, self.word2index["<S>"]] = 1.  # BOS
-                if self.use_image:
-                    # vfeats at time=0 only to avoid overfitting
-                    arrays[img_idx][idx, 0] = self.dataset[prefix][data_key]['img_feats'][:]
-                if self.use_sourcelang:
-                    arrays[1][idx, 0] = self.source_dataset[prefix][data_key]['final_hidden_features'][:]
-                idx += 1
-            return arrays
+        # populate the datastructures from the h5
+        idx = 0
+        h5items = self.dataset[prefix].keys()
+        for data_key in h5items[start:end]:
+            arrays[0][idx, 0, self.word2index["<S>"]] = 1.  # BOS
+            # if self.args.generate_from_N_words > 0: # TODO
+
+            if self.use_image:
+                # vfeats at time=0 only to avoid overfitting
+                arrays[img_idx][idx, 0] = self.dataset[prefix][data_key]['img_feats'][:]
+            if self.use_sourcelang:
+                arrays[1][idx, 0] = self.source_dataset[prefix][data_key]['final_hidden_features'][:]
+            idx += 1
+        return arrays
 
     def generate_sentences(self, filepath, val=True):
         """
@@ -325,35 +315,33 @@ class CompilationOfCallbacks(Callback):
 
         # max_size = 100 + 1 if self.args.small_val else len(self.dataset[prefix]) + 1
 
-        for indices in self.yield_chunks(range(len(self.dataset[prefix])),
+        for start, end in self.yield_chunks(len(self.dataset[prefix]),
                                          self.args.batch_size):
-            start = indices[0]
-            end = indices[-1]
+            #start = indices[0]
+            #end = indices[-1]
+            len_chunk = end - start + 1  # this is faster than len(indices)
 
-            batch_sentences = [["<S>"] for _ in range(len(indices))]
+            batch_sentences = [["<S>"] for _ in range(len_chunk)]
 
             # prepare the datastructures for generation
-            arrays = self.make_generation_arrays(len(indices), prefix, start,
-                                                 end)
+            arrays = self.make_generation_arrays(len_chunk, prefix, start, end)
 
-            for t in range(self.args.generation_timesteps):
+            start_gen = self.args.generate_from_N_words # Default 0
+            if start_gen > 0:
+                logger.info("Generating after %d true words of history",
+                            start_gen)
+
+            for t in range(start_gen, self.args.generation_timesteps):
                 # we take a view of the datastructures, which means we're only
                 # ever generating a prediction for the next word. This saves a
                 # lot of cycles.
-#                preds = self.model.predict([sents[:,0:t+1],
-#                                           source_feats[:,0:t+1],
-#                                           vfeats[:,0:t+1]] if
-#                                           self.args.source_vectors != None
-#                                           else [sents[:,0:t+1],
-#                                                 vfeats[:,0:t+1]], verbose=0)
 
-                # TODO check that this passes views around, not array copies
                 preds = self.model.predict([arr[:, 0:t+1] for arr in arrays],
                                            verbose=0)
 
                 next_word_indices = np.argmax(preds[:, t], axis=1)
                 # update array[0]/sentence-so-far with generated words.
-                for i in range(len(indices)):
+                for i in range(len_chunk):
                     arrays[0][i, t+1, next_word_indices[i]] = 1.
                 next_words = [self.index2word[x] for x in next_word_indices]
                 for i in range(len(next_words)):
@@ -372,82 +360,35 @@ class CompilationOfCallbacks(Callback):
         handle.close()
 
     def calculate_pplx(self, val=True):
-        '''
-        Calculcates the PPLX of the model, given the gold-standard
-        validation data. PPLX is calculated over X_true and Y_true until
-        we hit batch-length padding <P> in X_true.
-        '''
-
+        """ Without batching. Robust against multiple descriptions/image,
+        since it uses data_generator.get_data_by_split input. """
         prefix = "val" if val else "test"
-        logger.info("Calculating pplx over %s data", prefix)
-        complete_logprobs = []
-        complete_len = 0
-        input_data, Y_true = self.data_generator.get_data_by_split(prefix,
+        logger.debug("Calculating pplx over %s data", prefix)
+        sum_logprobs = 0
+        y_len = 0
+        input_data, Y_target = self.data_generator.get_data_by_split(prefix,
                                        self.use_sourcelang, self.use_image)
-        X_true = input_data[0]
-        max_timesteps = Y_true.shape[1]
 
-        for indices in self.yield_chunks(range(len(X_true)),
-                                         self.args.batch_size):
-            start = indices[0]
-            end = indices[-1]
+        if self.args.debug:
+            tic = time.time()
 
-            if self.args.debug:
-                btic = time.time()
+        preds = self.model.predict(input_data, verbose=0)
 
-            logprobs = [[] for _ in range(len(indices))]
-            batch_Y = Y_true[start:end+1]
-            batch_len = 0
+        if self.args.debug:
+            logger.info("Forward pass took %f", time.time()-tic)
 
-            # prepare the datastructures
-            sents = X_true[start:end+1]
-            vfeats = np.zeros((len(indices),
-                               max_timesteps,
-                               IMG_FEATS))
-            if self.args.source_vectors is not None:
-                sfeats = np.zeros((len(indices),
-                                   max_timesteps,
-                                   self.hsn_size))
-            idx = 0
-            h5items = self.dataset[prefix].keys()
-            # populate the datastructures from the h5
-            for data_key in h5items[start:end]:
-                # vfeats at time=0 only to avoid overfitting
-                vfeats[idx, 0] = self.dataset[prefix][data_key]\
-                                             ['img_feats'][:]
-                if self.args.source_vectors is not None:
-                    sfeats[idx, 0] = self.data_gen.source_dataset[prefix][data_key]\
-                                          ['final_hidden_features'][:]
-                idx += 1
+        for t in range(Y_target.shape[1]):
+            for i in range(Y_target.shape[0]):
+                target_idx = np.argmax(Y_target[i, t])
+                if self.index2word[target_idx] != "<P>":
+                    log_p = math.log(preds[i, t, target_idx],2)
+                    #logprobs.append(log_p)
+                    sum_logprobs += -log_p
+                    y_len += 1
 
-            if self.args.debug:
-                tic = time.time()
-
-            preds = self.model.predict([sents, sfeats, vfeats] if
-                                       self.args.source_vectors is not None
-                                       else [sents, vfeats],
-                                       verbose=0)
-            if self.args.debug:
-                logger.info("Forward pass took %f", time.time()-tic)
-
-            for t in range(max_timesteps):
-                for i in range(len(indices)):
-                    target_idx = np.argmax(batch_Y[i, t])
-                    if self.index2word[target_idx] != "<P>":
-                        logprobs[i].append(preds[i, t, target_idx])
-                        batch_len += 1
-
-            complete_logprobs.append(logprobs[:])
-            complete_len += batch_len
-
-            if self.args.debug:
-                logger.info("Batch took %f s", time.time()-btic)
-
-        logprob = -sum([math.log(a, 2) for b in
-                       itertools.chain.from_iterable(complete_logprobs)
-                       for a in b])
-        norm_logprob = logprob / complete_len
+        norm_logprob = sum_logprobs / y_len
         pplx = math.pow(2, norm_logprob)
-        logger.info("logprob %f",  norm_logprob)
-        logger.info("pplx %f", pplx)
+        logger.debug("PPLX: %.4f", pplx)
         return pplx
+
+

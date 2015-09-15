@@ -111,7 +111,6 @@ class VisualWordLSTM(object):
 
         for epoch in range(self.args.epochs):
             batch = 1
-            # for trainX, trainIX, trainY, trainS, indicator in self.data_generator.yield_training_batch():
             for train_input, trainY, indicator in\
                 self.data_generator.yield_training_batch(big_batch_size,
                                                          self.use_sourcelang,
@@ -125,8 +124,8 @@ class VisualWordLSTM(object):
                     model.fit(train_input,
                               trainY,
                               validation_data=None if
-                              self.args.enable_val_pplx else
-                              (val_input, valY),
+                                  self.args.enable_val_pplx
+                                  else (val_input, valY),
                               callbacks=[callbacks],
                               nb_epoch=1,
                               verbose=1,
@@ -160,6 +159,7 @@ if __name__ == "__main__":
                         help="Print debug messages to stdout?")
     parser.add_argument("--fixed_seed", action="store_true", help="initialise\
                         numpy rng from a fixed random seed? Useful for debug.\
+                        NOTE: THIS HAS NO EFFECT.\
                        (default = False)")
     parser.add_argument("--init_from_checkpoint", help="Initialise the model\
                         parameters from a pre-defined checkpoint? Useful to\
@@ -169,6 +169,11 @@ if __name__ == "__main__":
                         help="Calculate and report smoothed validation pplx\
                         instead of Keras objective function loss. Turns off\
                         calculation of Keras val loss. (default=true)")
+    parser.add_argument("--generate_from_N_words", type=int, default=0,
+                        help="Use N words as starting point when generating\
+                        strings. Useful mostly for mt-only model (in other\
+                        cases, image provides enough useful starting\
+                        context.)")
 
     parser.add_argument("--small", action="store_true",
                         help="Run on 100 images. Useful for debugging")
