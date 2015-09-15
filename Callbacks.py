@@ -182,7 +182,7 @@ class CompilationOfCallbacks(Callback):
         '''
 
         prefix = self.args.run_string if self.args.run_string != "" else ""
-        number = "%03d" % (len(self.val_loss) + 1)
+        number = "%03d" % (len(self.val_bleu) + 1)
         filepath = "checkpoints/%s/%s-%s" % ((prefix, savetime, number))
         try:
             os.mkdir("checkpoints/%s/" % (prefix))
@@ -319,7 +319,14 @@ class CompilationOfCallbacks(Callback):
                                          self.args.batch_size):
             #start = indices[0]
             #end = indices[-1]
-            len_chunk = end - start + 1  # this is faster than len(indices)
+            # HACK: terrible quick fix that prevents len_chunk being too
+            #       large for the final batch.
+            if end > len(self.dataset[prefix]):
+                end = len(self.dataset[prefix])
+                len_chunk = end - start  # this is faster than len(indices)
+            else:
+                len_chunk = end - start + 1  # this is faster than len(indices)
+            print(len_chunk)
 
             batch_sentences = [["<S>"] for _ in range(len_chunk)]
 
