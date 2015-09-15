@@ -5,10 +5,6 @@ import theano
 import argparse
 import logging
 
-<<<<<<< HEAD
-=======
-from util.ptbtokenizer import PTBTokenizer
->>>>>>> 0291f68... Changes extract_hidden_features to work with mt-only.
 from data_generator import VisualWordDataGenerator
 import models
 
@@ -20,70 +16,13 @@ logger = logging.getLogger(__name__)
 IMG_FEATS = 4096
 
 
-class VisualWordLSTM:
+class ExtractFinalHiddenActivations:
 
-<<<<<<< HEAD
-  def __init__(self, args):
-    self.args = args
-    self.vocab = dict()
-    self.unkdict = dict()
-    self.counter = 0
-    self.maxSeqLen = 0
-
-    if self.args.debug:
-      theano.config.optimizer='None'
-      theano.config.exception_verbosity='high'
-
-  def get_hsn_activations(self):
-    '''
-    In the model, we will merge the VGG image representation with
-    the word embeddings. We need to feed the data as a list, in which
-    the order of the elements in the list is _crucial_.
-    '''
-
-    self.data_generator = VisualWordDataGenerator(self.args,
-                                                  self.args.dataset,
-                                                  self.args.hidden_size)
-    self.data_generator.set_vocabulary(self.args.checkpoint)
-    self.vocab_len = len(self.data_generator.index2word)
-
-    m = models.OneLayerLSTM(self.args.hidden_size, self.vocab_len,
-                            self.args.dropin,
-                            self.args.optimiser, self.args.l2reg,
-                            weights=self.args.checkpoint,
-                            gru=self.args.gru)
-
-    self.model = m.buildHSNActivations()
-
-    self.generate_activations('train')
-    self.generate_activations('val')
-
-  def generate_activations(self, split, gold=True):
-      '''
-      Generate and serialise final-timestep hidden state activations
-      into --dataset.
-
-      TODO: we should be able to serialise predicted final states instead
-            of gold-standard final states for val and test data.
-      '''
-      logger.info("Generating hsn activations from this model for %s\n", split)
-
-      if split == 'train':
-          hsn_shape = 0
-          hidden_states = []
-          for trainX, trainIX, trainY, trainS, _ in\
-              self.data_generator.yield_training_batch():
-              hsn = self.model.predict([trainX, trainIX],
-                                       batch_size=self.args.batch_size,
-                                       verbose=1)
-              for h in hsn:
-=======
     def __init__(self, args):
         self.args = args
         self.vocab = dict()
         self.unkdict = dict()
         self.counter = 0
-        self.tokenizer = PTBTokenizer()
         self.maxSeqLen = 0
 
         # consistent with models.py
@@ -168,7 +107,6 @@ class VisualWordLSTM:
                                      batch_size=self.args.batch_size,
                                      verbose=1)
             for h in hsn:
->>>>>>> 0291f68... Changes extract_hidden_features to work with mt-only.
                 final_hidden = h[hsn.shape[1]-1]
                 hsn_shape = h.shape[1]
                 hidden_states.append(final_hidden)
@@ -270,5 +208,5 @@ if __name__ == "__main__":
                         (default: None.) Expects a final_hidden_representation\
                         vector for each image in the dataset")
 
-    w = VisualWordLSTM(parser.parse_args())
+    w = ExtractFinalHiddenActivations(parser.parse_args())
     w.get_hsn_activations()
