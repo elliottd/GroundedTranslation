@@ -326,7 +326,6 @@ class CompilationOfCallbacks(Callback):
                 len_chunk = end - start  # this is faster than len(indices)
             else:
                 len_chunk = end - start + 1  # this is faster than len(indices)
-            print(len_chunk)
 
             batch_sentences = [["<S>"] for _ in range(len_chunk)]
 

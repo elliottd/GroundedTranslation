@@ -489,10 +489,19 @@ class VisualWordDataGenerator(object):
         for time, vocab in enumerate(w_indices):
             seq_array[time + 1, vocab] += 1
         # add EOS token at end of sentence
-        assert time + 1 == len(w_indices),\
-            "time %d sequence %s len w_indices %d seq_array %s" % (
-                time, " ".join([x for x in sequence]), len(w_indices),
-                seq_array)
+        try:
+            assert time + 1 == len(w_indices),\
+                "time %d sequence %s len w_indices %d seq_array %s" % (
+                    time, " ".join([x for x in sequence]), len(w_indices),
+                    seq_array)
+        except AssertionError:
+            if len(w_indices) == 0 and time == 0:
+                # none of the words in this description appeared in the
+                # vocabulary. this is most likely caused by the --unk
+                # threshold.
+                #
+                # HACK: encoding this sentence as [BOS, EOS]
+                pass
         seq_array[len(w_indices) + 1, self.word2index[EOS]] += 1
         return seq_array
 
