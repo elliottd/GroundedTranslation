@@ -104,20 +104,11 @@ class CompilationOfCallbacks(Callback):
 
         for epoch in range(len(self.val_pplx)):
             if self.args.enable_val_pplx:
-                if epoch == 0:
-                    smooth_pplx = self.val_pplx[epoch]
-                else:
-                    # Exponential moving average of PPLX
-                    # https://en.wikipedia.org/wiki/Exponential_smoothing
-                    smooth_pplx = 0.99 * smooth_pplx\
-                        + 0.01 * self.val_pplx[epoch]
-
-                logger.info("Checkpoint %d | val pplx: %.5f smooth: %.5f bleu %.2f",
-                            epoch+1, self.val_pplx[epoch], smooth_pplx,
+                logger.info("Checkpoint %d | val pplx: %.5f bleu %.2f",
+                            epoch+1, self.val_pplx[epoch],
                             self.val_bleu[epoch])
-                handle.write("Checkpoint %d | val pplx: %.5f\
-                              smoothed: %.5f bleu %.2f\n"
-                             % (epoch+1, self.val_pplx[epoch], smooth_pplx,
+                handle.write("Checkpoint %d | val pplx: %.5f bleu %.2f\n"
+                             % (epoch+1, self.val_pplx[epoch],
                                 self.val_bleu[epoch]))
             else:
                 logger.info("Checkpoint %d | val loss: %.5f bleu %.2f",
