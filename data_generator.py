@@ -142,6 +142,7 @@ class VisualWordDataGenerator(object):
                                               use_sourcelang, use_image)
         num_descriptions = 0  # total num descriptions found so far.
         batch_max_seq_len = 0
+        discarded = 0  # total num of discards
         if use_sourcelang and use_image:  # where is image array in arrays.
             img_idx = 2
         else:
@@ -178,7 +179,7 @@ class VisualWordDataGenerator(object):
                         # descriptions left
                         this_bbs = big_batch_size
                         if (training_size - num_descriptions) < big_batch_size:
-                            this_bbs = training_size - num_descriptions
+                            this_bbs = training_size - num_descriptions - discarded
                             logger.info("Creating (truncated) final big batch, size %d", this_bbs)
                         arrays = self.get_new_training_arrays(this_bbs,
                                                               use_sourcelang, use_image)
@@ -186,21 +187,22 @@ class VisualWordDataGenerator(object):
                     if len(description.split()) > batch_max_seq_len:
                         batch_max_seq_len = len(description.split())
 
-                    #try:
-                    # arrays[0] is dscrp_array
-                    arrays[0][batch_index, :, :] = self.format_sequence(
-                        description.split())
-                    if use_sourcelang:
-                        arrays[1][batch_index, 0, :] =\
-                            self.get_hsn_features('train', data_key)
-                    if use_image:
-                        # img_idx is 1 or 2, depending on use_sourcelang
-                        arrays[img_idx][batch_index, 0, :] =\
-                            self.get_image_features(dataset, 'train', data_key)
-                    num_descriptions += 1
-                    #except AssertionError:  # where is this from?
-                    #    continue
-
+                    try:
+                        arrays[0][batch_index, :, :] = self.format_sequence(
+                            description.split())
+                        if use_sourcelang:
+                            arrays[1][batch_index, 0, :] =\
+                                self.get_hsn_features('train', data_key)
+                        if use_image:
+                            # img_idx is 1 or 2, depending on use_sourcelang
+                            arrays[img_idx][batch_index, 0, :] =\
+                                self.get_image_features(dataset, 'train', data_key)
+                        num_descriptions += 1
+                    except AssertionError:
+                        # thrown by format_sequence() when we cannot encode
+                        # any words in the sentence
+                        discarded += 1
+                        continue
 
             # End of looping through a dataset (may be one of many).
             # Yield final batch for this dataset.
@@ -214,7 +216,7 @@ class VisualWordDataGenerator(object):
 #               arrays = self.resize_arrays(batch_index, arrays)
             assert batch_index == arrays[0].shape[0],\
                     "Filled array %d, size %d" % (batch_index, arrays[0].shape[0])
-            assert num_descriptions == training_size,\
+            assert num_descriptions == training_size - discarded,\
                     "Yielded %d descriptions, train size %d (%d)" % (
                         num_descriptions,  training_size, self.split_sizes['train'])
 
@@ -229,7 +231,7 @@ class VisualWordDataGenerator(object):
             # For next dataset (i.e. if supertraining)
             arrays = self.get_new_training_arrays(
                 big_batch_size, use_sourcelang, use_image)
-            filled_counter = 0
+            discarded = 0
 
     def resize_arrays(self, new_size, arrays):
         """
@@ -500,8 +502,10 @@ class VisualWordDataGenerator(object):
                 # vocabulary. this is most likely caused by the --unk
                 # threshold.
                 #
-                # HACK: encoding this sentence as [BOS, EOS]
-                pass
+                # we don't encode this sentence because [BOS, EOS] doesn't
+                # make sense
+                logger.warning("Skipping '%s' because none of its words appear in the vocabulary" % ' '.join([x for x in sequence]))
+                raise AssertionError
         seq_array[len(w_indices) + 1, self.word2index[EOS]] += 1
         return seq_array
 
