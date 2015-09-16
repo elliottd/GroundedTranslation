@@ -219,8 +219,12 @@ if __name__ == "__main__":
     parser.add_argument("--gru", action="store_true", help="Use GRU instead\
                         of LSTM recurrent state? (default = False)")
 
-    parser.add_argument("--optimiser", default="adagrad", type=str,
+    parser.add_argument("--optimiser", default="adam", type=str,
                         help="Optimiser: rmsprop, momentum, adagrad, etc.")
+    parser.add_argument("--lr", default=None, type=float)
+    parser.add_argument("--beta1", default=None, type=float)
+    parser.add_argument("--beta2", default=None, type=float)
+    parser.add_argument("--epsilon", default=None, type=float)
     parser.add_argument("--stopping_loss", default="bleu", type=str,
                         help="minimise cross-entropy or maximise BLEU?")
     parser.add_argument("--checkpointing", default=100, type=int,

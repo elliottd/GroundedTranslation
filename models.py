@@ -2,6 +2,7 @@ from keras.models import Sequential
 from keras.layers.core import Activation, Dropout, Merge, TimeDistributedDense
 from keras.layers.recurrent import LSTM, GRU
 from keras.regularizers import l2
+from keras.optimizers import Adam
 
 import h5py
 import math
@@ -128,8 +129,20 @@ class OneLayerLSTM:
         model.add(LSTM(self.hidden_size, self.hidden_size,  # 1st GRU layer
                        return_sequences=True))
 
-        model.compile(loss='categorical_crossentropy',
-                      optimizer=self.optimiser)
+        if self.optimiser == 'adam':
+            # allow user-defined hyper-parameters for ADAM because it is
+            # our preferred optimiser
+            lr = self.lr if self.lr is not None else 0.001
+            beta1 = self.beta1 if self.beta1 is not None else 0.9
+            beta2 = self.beta2 if self.beta2 is not None else 0.999
+            epsilon = self.epsilon if self.epsilon is not None else 1e-8
+            optimiser = Adam(lr=lr, beta1=beta1,
+                             beta2=beta2, epsilon=epsilon)
+            model.compile(loss='categorical_crossentropy',
+                          optimizer=optimiser)
+        else:
+            model.compile(loss='categorical_crossentropy',
+                          optimizer=self.optimiser)
 
         if self.weights is not None:
             logger.info("... with weights defined in %s", self.weights)
