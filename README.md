@@ -32,7 +32,7 @@ Run `python train.py --dataset iaprtc12_ger --hidden_size=256` to train a German
 
 This model should report a maximum BLEU4 of 11.78 on the val split, using a fixed seed of 1234.
 
-Training a multilingual model
+Training an English-German multilingual model
 ---
 
 Run `python extract_hidden_features.py --dataset=iaprtc12_eng --checkpoint=PATH_TO_BEST_MODEL_CHECKPOINT --hidden_size=512 --h5_writeable` to extract the final hidden state representations from a saved model state. The representations will be stored in `dataset/dataset.h5` in the `final_hidden_representations` field.
