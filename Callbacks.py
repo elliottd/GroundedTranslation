@@ -119,12 +119,22 @@ class CompilationOfCallbacks(Callback):
                                 self.val_bleu[epoch]))
 
         # BLEU is the quickest indicator of performance for our task
-        best = np.nanargmax(self.val_bleu)
+        # but PPLX (2^loss) is our objective function
+        best_bleu = np.nanargmax(self.val_bleu)
         if self.args.enable_val_pplx:
-            logger.info("Best checkpoint: %d | val pplx %.5f bleu %.2f",
-                        best+1, self.val_pplx[best], self.val_bleu[best])
-            handle.write("Best checkpoint: %d | val pplx %.5f bleu %.2f"
-                         % (best+1, self.val_pplx[best], self.val_bleu[best]))
+            best_pplx = np.nanargmin(self.val_pplx)
+            logger.info("Best BLEU: %d | val pplx %.5f bleu %.2f",
+                        best_bleu+1, self.val_pplx[best_bleu],
+                        self.val_bleu[best_bleu])
+            handle.write("Best BLEU: %d | val pplx %.5f bleu %.2f"
+                         % (best_bleu+1, self.val_pplx[best_bleu],
+                         self.val_bleu[best_bleu]))
+            logger.info("Best PPLX: %d | val pplx %.5f bleu %.2f",
+                        best_pplx+1, self.val_pplx[best_pplx],
+                        self.val_bleu[best_pplx])
+            handle.write("Best PPLX: %d | val pplx %.5f bleu %.2f"
+                         % (best_pplx+1, self.val_pplx[best_pplx],
+                         self.val_bleu[best_pplx]))
         else:
             logger.info("Best checkpoint: %d | val loss %.5f bleu %.2f",
                         best+1, self.val_loss[best], self.val_bleu[best])

@@ -3,8 +3,9 @@ Entry module and class module for training a VisualWordLSTM.
 """
 
 from __future__ import print_function
-import numpy as np
-np.random.seed(1234)  # comment for random behaviour
+#  uncomment for fixed-seed behaviour. useful for debugging.
+# import numpy as np
+# np.random.seed(1234)
 
 import theano
 import argparse
@@ -39,7 +40,6 @@ class VisualWordLSTM(object):
             theano.config.optimizer = 'None'
             theano.config.exception_verbosity = 'high'
 
-
     def train_model(self):
         '''
         In the model, we will merge
@@ -60,12 +60,11 @@ class VisualWordLSTM(object):
 
         # Keras doesn't do batching of val set, so
         # assume val data is small enough to get all at once.
-        # valX, valIX, valY, valS = self.data_generator.get_data_by_split('val')
         # val_input is the list passed to model.fit()
         # val_input can contain image, source features as well (or not)
         if not self.args.enable_val_pplx:
             val_input, valY = self.data_generator.get_data_by_split('val',
-                              self.use_sourcelang, self.use_image)
+                                  self.use_sourcelang, self.use_image)
 
         if not self.use_sourcelang:
             hsn_size = 0
