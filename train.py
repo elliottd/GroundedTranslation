@@ -108,7 +108,12 @@ class VisualWordLSTM(object):
             big_batch_size = self.data_generator.split_sizes['train']
             batches = 1
 
-        for epoch in range(self.args.epochs):
+        # for epoch in range(self.args.epochs):
+        epoch = 0
+        while True:
+            # the program will exit with sys.exit(0) in
+            # Callbacks.early_stop_decision(). Do not put any clean-up
+            # after this loop. It will NEVER be executed!
             batch = 1
             for train_input, trainY, indicator in\
                 self.data_generator.yield_training_batch(big_batch_size,
@@ -138,6 +143,7 @@ class VisualWordLSTM(object):
                               batch_size=self.args.batch_size,
                               shuffle=True)
                 batch += 1
+            epoch += 1
 
     def log_run_arguments(self):
         '''
@@ -206,6 +212,9 @@ if __name__ == "__main__":
                         0 loads entire dataset. Default is 1000")
 
     parser.add_argument("--epochs", default=50, type=int)
+    parser.add_argument("--patience", type=int, default=10, help="Training\
+                        will be terminated if validation BLEU score does not\
+                        increase for this number of epochs")
     parser.add_argument("--batch_size", default=100, type=int)
     parser.add_argument("--hidden_size", default=512, type=int)
     parser.add_argument("--dropin", default=0.5, type=float,

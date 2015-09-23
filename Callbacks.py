@@ -52,6 +52,10 @@ class CompilationOfCallbacks(Callback):
         self.index2word = index2word
         self.args = argsDict
 
+        # used to control early stopping on the validation data
+        self.wait = 0
+        self.patience = self.args.patience
+
         # needed by model.predict in generate_sentences
         self.use_sourcelang = use_sourcelang
         self.use_image = use_image
@@ -77,7 +81,8 @@ class CompilationOfCallbacks(Callback):
           2. save the arguments used to initialise the run
           3. generate N sentences in the val data by sampling from the model
           4. calculate BLEU score of the generated sentences
-          5. decide whether to save the model parameters using BLEU
+          5. determine whether to stop training and sys.exit(0)
+          6. save the model parameters using BLEU
         '''
         savetime = strftime("%d%m%Y-%H%M%S", gmtime())
         path = self.create_checkpoint_directory(savetime)
@@ -91,7 +96,30 @@ class CompilationOfCallbacks(Callback):
         self.generate_sentences(path)
         val_bleu = self.__bleu_score__(path)
 
+        self.early_stop_decision(len(self.val_bleu)+1, val_bleu)
         self.checkpoint_parameters(epoch, logs, path, val_bleu, val_pplx)
+
+    def early_stop_decision(self, epoch, val_bleu):
+        '''
+        Stop training if validation BLEU score has not increased for
+        --patience epochs.
+
+        WARNING: quits with sys.exit(0).
+        '''
+
+        if val_bleu > self.best_val_bleu:
+            self.wait = 0
+        else:
+            if self.wait >= self.patience:
+                logger.info("Epoch %d: early stopping", epoch)
+                handle = open("checkpoints/%s/summary"
+                              % self.args.run_string, "a")
+                handle.write("Early stopping because patience exceeded")
+                handle.close()
+                sys.exit(0)
+            self.wait += 1
+        logger.info("Early stopping marker: wait/patience: %d/%d",
+                    self.wait, self.patience)
 
     def on_train_end(self, logs={}):
         '''
@@ -126,20 +154,24 @@ class CompilationOfCallbacks(Callback):
             logger.info("Best BLEU: %d | val pplx %.5f bleu %.2f",
                         best_bleu+1, self.val_pplx[best_bleu],
                         self.val_bleu[best_bleu])
-            handle.write("Best BLEU: %d | val pplx %.5f bleu %.2f"
+            handle.write("Best BLEU: %d | val pplx %.5f bleu %.2f\n"
                          % (best_bleu+1, self.val_pplx[best_bleu],
-                         self.val_bleu[best_bleu]))
+                            self.val_bleu[best_bleu]))
             logger.info("Best PPLX: %d | val pplx %.5f bleu %.2f",
                         best_pplx+1, self.val_pplx[best_pplx],
                         self.val_bleu[best_pplx])
-            handle.write("Best PPLX: %d | val pplx %.5f bleu %.2f"
+            handle.write("Best PPLX: %d | val pplx %.5f bleu %.2f\n"
                          % (best_pplx+1, self.val_pplx[best_pplx],
-                         self.val_bleu[best_pplx]))
+                            self.val_bleu[best_pplx]))
         else:
             logger.info("Best checkpoint: %d | val loss %.5f bleu %.2f",
-                        best+1, self.val_loss[best], self.val_bleu[best])
+                        best_bleu+1, self.val_loss[best_bleu],
+                        self.val_bleu[best_bleu])
             handle.write("Best checkpoint: %d | val loss %.5f bleu %.2f"
-                         % (best+1, self.val_loss[best], self.val_bleu[best]))
+                         % (best_bleu+1, self.val_loss[best_bleu],
+                            self.val_bleu[best_bleu]))
+        handle.write("Early stopping marker: wait/patience: %d/%d" %
+                     self.wait, self.patience)
         handle.close()
 
     def extract_references(self, directory, split):
@@ -152,7 +184,6 @@ class CompilationOfCallbacks(Callback):
             codecs.open('%s/%s_reference.ref%d' % (directory, split, refid),
                         #'w', 'utf-8').write('\n'.join([x[refid] for x in references]))
                         'w', 'utf-8').write('\n'.join(['\n'.join(x) for x in references]))
-
 
     def __bleu_score__(self, directory, val=True):
         '''
@@ -258,7 +289,7 @@ class CompilationOfCallbacks(Callback):
         items.
         '''
         for i in xrange(0, len_split_indices, batch_size):
-            #yield split_indices[i:i+batch_size]
+            # yield split_indices[i:i+batch_size]
             yield (i, i+batch_size-1)
 
     def make_generation_arrays(self, array_size, prefix, start, end):
@@ -328,12 +359,15 @@ class CompilationOfCallbacks(Callback):
             else:
                 len_chunk = end - start + 1  # this is faster than len(indices)
 
-            batch_sentences = [["<S>"] for _ in range(len_chunk)]
+            start_gen = self.args.generate_from_N_words # Default 0
 
             # prepare the datastructures for generation
             arrays = self.make_generation_arrays(len_chunk, prefix, start, end)
+            batch_sentences = [["<S>"] for _ in range(len_chunk)]
+            # for t in range(0, start_gen):
+            #     for i in range(len_chunk):
+            #         batch_sentences[i].append(self.index2word[arrays[0][i,t]])
 
-            start_gen = self.args.generate_from_N_words # Default 0
             if start_gen > 0:
                 logger.info("Generating after %d true words of history",
                             start_gen)
@@ -397,5 +431,3 @@ class CompilationOfCallbacks(Callback):
         pplx = math.pow(2, norm_logprob)
         logger.debug("PPLX: %.4f", pplx)
         return pplx
-
-
