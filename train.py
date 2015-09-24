@@ -162,10 +162,6 @@ if __name__ == "__main__":
                         help="Optional string to help you identify the run")
     parser.add_argument("--debug", action="store_true",
                         help="Print debug messages to stdout?")
-    parser.add_argument("--fixed_seed", action="store_true", help="initialise\
-                        numpy rng from a fixed random seed? Useful for debug.\
-                        NOTE: THIS HAS NO EFFECT.\
-                       (default = False)")
     parser.add_argument("--init_from_checkpoint", help="Initialise the model\
                         parameters from a pre-defined checkpoint? Useful to\
                         continue training a model.", default=None, type=str)
@@ -207,9 +203,9 @@ if __name__ == "__main__":
                         datasets to use as additional training input (defaults\
                         to None)")
 
-    parser.add_argument("--big_batch_size", default=1000, type=int,
+    parser.add_argument("--big_batch_size", default=10000, type=int,
                         help="Number of examples to load from disk at a time;\
-                        0 loads entire dataset. Default is 1000")
+                        0 loads entire dataset. Default is 10000")
 
     parser.add_argument("--epochs", default=50, type=int)
     parser.add_argument("--patience", type=int, default=10, help="Training\
@@ -244,8 +240,8 @@ if __name__ == "__main__":
                         help="L2 cost penalty. Default=1e-8")
 
     parser.add_argument("--unk", type=int,
-                        help="unknown character cut-off. Default=5", default=5)
-    parser.add_argument("--generation_timesteps", default=10, type=int,
+                        help="unknown character cut-off. Default=3", default=3)
+    parser.add_argument("--generation_timesteps", default=30, type=int,
                         help="Maximum number of words to generate for unseen\
                         data (default=10).")
     parser.add_argument("--h5_writeable", action="store_true",
