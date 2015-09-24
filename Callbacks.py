@@ -114,7 +114,7 @@ class CompilationOfCallbacks(Callback):
                 logger.info("Epoch %d: early stopping", epoch)
                 handle = open("checkpoints/%s/summary"
                               % self.args.run_string, "a")
-                handle.write("Early stopping because patience exceeded")
+                handle.write("Early stopping because patience exceeded\n")
                 handle.close()
                 sys.exit(0)
             self.wait += 1
@@ -170,7 +170,7 @@ class CompilationOfCallbacks(Callback):
             handle.write("Best checkpoint: %d | val loss %.5f bleu %.2f"
                          % (best_bleu+1, self.val_loss[best_bleu],
                             self.val_bleu[best_bleu]))
-        handle.write("Early stopping marker: wait/patience: %d/%d" %
+        handle.write("Early stopping marker: wait/patience: %d/%d\n" %
                      (self.wait, self.patience))
         handle.close()
 
@@ -215,7 +215,7 @@ class CompilationOfCallbacks(Callback):
 
         prefix = self.args.run_string if self.args.run_string != "" else ""
         number = "%03d" % (len(self.val_bleu) + 1)
-        filepath = "checkpoints/%s/%s-%s" % ((prefix, savetime, number))
+        filepath = "checkpoints/%s/%s-%s" % ((prefix, number, savetime))
         try:
             os.mkdir("checkpoints/%s/" % (prefix))
             shutil.copyfile("train.py", "checkpoints/%s/train.py" % prefix)
