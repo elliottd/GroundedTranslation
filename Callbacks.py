@@ -19,8 +19,8 @@ import math
 import time
 
 # Set up logger
-#logging.basicConfig(level=logging.INFO)
-logging.basicConfig(level=logging.DEBUG)
+logging.basicConfig(level=logging.INFO)
+#logging.basicConfig(level=logging.DEBUG)
 logger = logging.getLogger(__name__)
 
 # Dimensionality of image feature vector
@@ -171,7 +171,7 @@ class CompilationOfCallbacks(Callback):
                          % (best_bleu+1, self.val_loss[best_bleu],
                             self.val_bleu[best_bleu]))
         handle.write("Early stopping marker: wait/patience: %d/%d" %
-                     self.wait, self.patience)
+                     (self.wait, self.patience))
         handle.close()
 
     def extract_references(self, directory, split):
@@ -292,48 +292,33 @@ class CompilationOfCallbacks(Callback):
             # yield split_indices[i:i+batch_size]
             yield (i, i+batch_size-1)
 
-    def make_generation_arrays(self, array_size, prefix, start, end):
+    def make_generation_arrays(self, prefix, fixed_words):
         """Create arrays that are used as input for generation. """
-        arrays = []
-        img_idx = 1
-        # descriptions/sents
-        arrays.append(np.zeros((array_size,
-                                self.args.generation_timesteps+1,
-                                len(self.word2index))))
-        if self.use_sourcelang:
-            num_source_feats = len(self.source_dataset['train']['000000']
-                                   ['final_hidden_features'][:])
-            arrays.append(np.zeros((array_size,
-                                   self.args.generation_timesteps+1,
-                                    num_source_feats)))
-            img_idx += 1  # image features at array[2]
-        if self.use_image:
-            arrays.append(np.zeros((array_size,
-                                    self.args.generation_timesteps+1,
-                                    IMG_FEATS)))
 
-        # populate the datastructures from the h5
-        idx = 0
-        h5items = self.dataset[prefix].keys()
-        for data_key in h5items[start:end]:
-            arrays[0][idx, 0, self.word2index["<S>"]] = 1.  # BOS
-            # if self.args.generate_from_N_words > 0: # TODO
+        # Y_target is unused
+        input_data, _ = self.data_generator.get_data_by_split(prefix,
+                                       self.use_sourcelang, self.use_image)
 
-            if self.use_image:
-                # vfeats at time=0 only to avoid overfitting
-                arrays[img_idx][idx, 0] = self.dataset[prefix][data_key]['img_feats'][:]
-            if self.use_sourcelang:
-                arrays[1][idx, 0] = self.source_dataset[prefix][data_key]['final_hidden_features'][:]
-            idx += 1
-        return arrays
+        # Replace input words (input_data[0]) with zeros for generation,
+        # except for the first args.generate_from_N_words
+        # NOTE: this will include padding and BOS steps (fixed_words has been
+        # incremented accordingly already in generate_sentences().)
+        logger.info("Keeping first %d true words (incl BOS)", fixed_words)
+        input_data[0][:, fixed_words:, :] = 0
+
+        return input_data
+
 
     def generate_sentences(self, filepath, val=True):
         """
         Generates descriptions of images for --generation_timesteps
-        iterations through the LSTM. Each description is clipped to
-        the first <E> token. This process can be additionally conditioned
+        iterations through the LSTM. Each input description is clipped to
+        the first <BOS> token, or, if --generate_from_N_words is set, to the
+        first N following words (N + 1 BOS token).
+        This process can be additionally conditioned
         on source language hidden representations, if provided by the
         --source_vectors parameter.
+        The output is clipped to the first EOS generated, if it exists.
 
         TODO: beam search
         TODO: duplicated method with generate.py
@@ -342,57 +327,56 @@ class CompilationOfCallbacks(Callback):
         logger.info("Generating %s sentences from this model\n", prefix)
         handle = codecs.open("%s/%sGenerated" % (filepath, prefix), "w",
                              'utf-8')
+
+        start_gen = self.args.generate_from_N_words # Default 0
+        if start_gen > 0:
+            logger.info("Generating after %d true words of history",
+                        start_gen)
+        start_gen = start_gen + 1  # include BOS
+
+        # prepare the datastructures for generation (no batching over val)
+        arrays = self.make_generation_arrays(prefix, start_gen)
+        N_sents= arrays[0].shape[0]
+
         # holds the sentences as words instead of indices
-        complete_sentences = []
+        logger.info("Generating over %d sentences", N_sents)
 
-        # max_size = 100 + 1 if self.args.small_val else len(self.dataset[prefix]) + 1
+        # complete_sentences = [["<S>"] for _ in range(N_sents)]
 
-        for start, end in self.yield_chunks(len(self.dataset[prefix]),
-                                         self.args.batch_size):
-            #start = indices[0]
-            #end = indices[-1]
-            # HACK: terrible quick fix that prevents len_chunk being too
-            #       large for the final batch.
-            if end > len(self.dataset[prefix]):
-                end = len(self.dataset[prefix])
-                len_chunk = end - start  # this is faster than len(indices)
-            else:
-                len_chunk = end - start + 1  # this is faster than len(indices)
+        complete_sentences = [[] for _ in range(N_sents)]
+        for t in range(start_gen): # minimum 1
+            for i in range(N_sents):
+                w = np.argmax(arrays[0][i,t])
+                complete_sentences[i].append(self.index2word[w])
 
-            start_gen = self.args.generate_from_N_words # Default 0
+        logger.debug("Sentence 0 %s", complete_sentences[0])
+        logger.debug("Sentence 9 %s", complete_sentences[9])
 
-            # prepare the datastructures for generation
-            arrays = self.make_generation_arrays(len_chunk, prefix, start, end)
-            batch_sentences = [["<S>"] for _ in range(len_chunk)]
-            # for t in range(0, start_gen):
-            #     for i in range(len_chunk):
-            #         batch_sentences[i].append(self.index2word[arrays[0][i,t]])
+        logger.debug('t=start-1, %s', np.argmax(arrays[0][0, start_gen-1,:]))
+        logger.debug('t=start, %s', np.argmax(arrays[0][0, start_gen,:]))
+        logger.debug('t=start+1, %s', np.argmax(arrays[0][0, start_gen+1,:]))
 
-            if start_gen > 0:
-                logger.info("Generating after %d true words of history",
-                            start_gen)
+        for t in range(start_gen, self.args.generation_timesteps):
+            # we take a view of the datastructures, which means we're only
+            # ever generating a prediction for the next word. This saves a
+            # lot of cycles.
+            preds = self.model.predict([arr[:, 0:t] for arr in arrays],
+                                       verbose=0)
 
-            for t in range(start_gen, self.args.generation_timesteps):
-                # we take a view of the datastructures, which means we're only
-                # ever generating a prediction for the next word. This saves a
-                # lot of cycles.
+            # Look at the last indices for the words.
+            next_word_indices = np.argmax(preds[:, -1], axis=1)
+            # update array[0]/sentence-so-far with generated words.
+            for i in range(N_sents):
+                arrays[0][i, t, next_word_indices[i]] = 1.
+            next_words = [self.index2word[x] for x in next_word_indices]
+            for i in range(len(next_words)):
+                complete_sentences[i].append(next_words[i])
 
-                preds = self.model.predict([arr[:, 0:t+1] for arr in arrays],
-                                           verbose=0)
+        logger.debug("At t=%d Sentence 0 %s ", t, complete_sentences[0])
+        logger.debug("At t=%d Sentence 9 %s ", t, complete_sentences[9])
 
-                next_word_indices = np.argmax(preds[:, t], axis=1)
-                # update array[0]/sentence-so-far with generated words.
-                for i in range(len_chunk):
-                    arrays[0][i, t+1, next_word_indices[i]] = 1.
-                next_words = [self.index2word[x] for x in next_word_indices]
-                for i in range(len(next_words)):
-                    batch_sentences[i].append(next_words[i])
-
-            complete_sentences.extend(batch_sentences)
-
-            sys.stdout.flush()
-
-        # extract each sentence until it hits the first end-of-string token
+        sys.stdout.flush()
+        # print/extract each sentence until it hits the first end-of-string token
         for s in complete_sentences:
             handle.write(' '.join([x for x
                                    in itertools.takewhile(
