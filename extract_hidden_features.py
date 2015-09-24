@@ -1,5 +1,6 @@
 from __future__ import print_function
 
+import numpy as np
 import theano
 
 import argparse
@@ -72,7 +73,6 @@ class ExtractFinalHiddenActivations:
             """ WARNING: This collects the *entirety of the training data* in
             hidden_states, so should not be used on non-toy training data.
             """
-            hsn_shape = 0
             hidden_states = []
             batch_start = 0
             batch_end = 0
@@ -83,14 +83,21 @@ class ExtractFinalHiddenActivations:
                 hsn = self.model.predict(train_input,
                                          batch_size=self.args.batch_size,
                                          verbose=1)
-                for h in hsn:
-                    final_hidden = h[hsn.shape[1]-1]
-                    hidden_states.append(final_hidden)
-                    hsn_shape = h.shape[1]  # ? this is set repeatedly
+
+                for idx, h in enumerate(hsn):
+                    # get final_hidden index on a sentence-by-sentence
+                    # basis by searching for the first <E> in each trainY
+                    for widx, warr in enumerate(trainY[idx]):
+                        w = np.argmax(warr)
+                        if self.data_generator.index2word[w] == "<E>":
+                            final_hidden = h[widx]
+                            hidden_states.append(final_hidden)
+                            break
                     batch_end += 1
+
                 # Note: serialisation happens over training batches too.
                 # now serialise the hidden representations in the h5
-                self.serialise_to_h5(split, hsn_shape, hidden_states,
+                self.serialise_to_h5(split, len(hidden_states[0]), hidden_states,
                                      batch_start, batch_end)
 
                 batch_start = batch_end
@@ -101,18 +108,23 @@ class ExtractFinalHiddenActivations:
                 self.use_sourcelang, self.use_image)
             logger.info("Generating hsn activations from this model for val\n")
 
-            hsn_shape = 0
             hidden_states = []
             hsn = self.model.predict(val_input,
                                      batch_size=self.args.batch_size,
                                      verbose=1)
-            for h in hsn:
-                final_hidden = h[hsn.shape[1]-1]
-                hsn_shape = h.shape[1]
-                hidden_states.append(final_hidden)
+
+            for idx, h in enumerate(hsn):
+                # get final_hidden index on a sentence-by-sentence
+                # basis by searching for the first <E> in each trainY
+                for widx, warr in enumerate(valY[idx]):
+                    w = np.argmax(warr)
+                    if self.data_generator.index2word[w] == "<E>":
+                        final_hidden = h[widx]
+                        hidden_states.append(final_hidden)
+                        break
 
             # now serialise the hidden representations in the h5
-            self.serialise_to_h5(split, hsn_shape, hidden_states)
+            self.serialise_to_h5(split, len(hidden_states[0]), hidden_states)
 
     def serialise_to_h5(self, split, hsn_shape, hidden_states,
                         batch_start=None, batch_end=None):
