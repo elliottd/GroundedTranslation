@@ -108,6 +108,11 @@ class VisualWordDataGenerator(object):
         # Ignores test for now (change in extract_vocabulary)
         self.split_sizes = {'train': 0, 'val': 0, 'test': 0}
 
+        # These are used to speed up the validation process
+        self._cached_val_input = None
+        self._cached_val_targets = None
+        self._cached_references = None
+
     def get_vocab_size(self):
         """Return training (currently also +val) vocabulary size."""
         return len(self.word2index)
@@ -251,6 +256,10 @@ class VisualWordDataGenerator(object):
     def get_refs_by_split_as_list(self, split):
         """ Replaces extract_references in Callbacks."""
 
+        if self._cached_references is not None and split == "val":
+            logger.info("Retrieving cached val_references")
+            return self._cached_references
+
         # Doesn't work for train because of size/batching, also not needed.
         assert split in ['test', 'val'], "Not possible for split %s" % split
         references = []
@@ -262,6 +271,7 @@ class VisualWordDataGenerator(object):
             if self.args_dict.small_val and split == 'val':
                 if len(references) >= SMALL_VAL:
                     break
+        self._cached_references = references
         return references
 
     def get_data_by_split(self, split, use_sourcelang=False, use_image=True):
@@ -283,6 +293,10 @@ class VisualWordDataGenerator(object):
         smaller than split_size (and then truncated to d_idx, as before). This
         is so I can run this on a lower-memory machine without thrashing.
         """
+
+        if (self._cached_val_input is not None and split == "val"):
+            logger.info("Retrieving cached val_input and val_targets")
+            return (self._cached_val_input, self._cached_val_targets)
 
         logger.info("Making data for %s", split)
         if len(self.datasets) > 1 and split == "train":
@@ -329,6 +343,10 @@ class VisualWordDataGenerator(object):
         logger.debug("dscrp_array size: %s", arrays[0].shape)
         # TODO: truncate dscrp_array, img_array, targets
         # to actual_max_seq_len (+ padding)
+
+        self._cached_val_input = arrays
+        self._cached_val_targets = targets
+
         return (arrays, targets)
 
     def get_image_features_matrix(self, split):
