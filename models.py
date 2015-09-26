@@ -106,6 +106,7 @@ class OneLayerLSTM:
         '''
 
         logger.info('Building Keras model...')
+        logger.info('Using image features: %s', use_image)
 
         # We will learn word representations for each word
         text = Sequential()
