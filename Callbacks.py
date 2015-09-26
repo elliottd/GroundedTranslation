@@ -118,8 +118,6 @@ class CompilationOfCallbacks(Callback):
                 handle.close()
                 sys.exit(0)
             self.wait += 1
-        logger.info("Early stopping marker: wait/patience: %d/%d",
-                    self.wait, self.patience)
 
     def on_train_end(self, logs={}):
         '''
@@ -170,6 +168,8 @@ class CompilationOfCallbacks(Callback):
             handle.write("Best checkpoint: %d | val loss %.5f bleu %.2f"
                          % (best_bleu+1, self.val_loss[best_bleu],
                             self.val_bleu[best_bleu]))
+        logger.info("Early stopping marker: wait/patience: %d/%d",
+                    self.wait, self.patience)
         handle.write("Early stopping marker: wait/patience: %d/%d\n" %
                      (self.wait, self.patience))
         handle.close()
@@ -303,7 +303,8 @@ class CompilationOfCallbacks(Callback):
         # except for the first args.generate_from_N_words
         # NOTE: this will include padding and BOS steps (fixed_words has been
         # incremented accordingly already in generate_sentences().)
-        logger.info("Keeping first %d true words (incl BOS)", fixed_words)
+        logger.info("Initialising with the first %d gold words (incl BOS)",
+                    fixed_words)
         input_data[0][:, fixed_words:, :] = 0
 
         return input_data
