@@ -29,7 +29,7 @@ class ExtractFinalHiddenActivations:
         # consistent with models.py
         # maybe use_sourcelang isn't applicable here?
         self.use_sourcelang = args.source_vectors is not None
-        self.use_image = not args.mt_only
+        self.use_image = not args.no_image
 
         if self.args.debug:
             theano.config.optimizer = 'None'
@@ -210,8 +210,8 @@ if __name__ == "__main__":
                         help="Open the H5 file for write-access? Useful for\
                         serialising hidden states to disk. (default = False)")
 
-    parser.add_argument("--mt_only", action="store_true",
-                        help="Do not use image data: MT baseline.")
+    parser.add_argument("--no_image", action="store_true",
+                        help="Do not use image data.")
     # If --source_vectors = None: model uses only visual/image input, no
     # source language/encoder hidden layer representation feature vectors.
     parser.add_argument("--source_vectors", default=None, type=str,
