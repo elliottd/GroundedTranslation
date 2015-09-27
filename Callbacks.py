@@ -17,6 +17,7 @@ import sys
 from time import gmtime, strftime
 import math
 import time
+from copy import deepcopy
 
 # Set up logger
 logging.basicConfig(level=logging.INFO)
@@ -110,6 +111,7 @@ class CompilationOfCallbacks(Callback):
         if val_bleu > self.best_val_bleu:
             self.wait = 0
         else:
+            self.wait += 1
             if self.wait >= self.patience:
                 logger.info("Epoch %d: early stopping", epoch)
                 handle = open("checkpoints/%s/summary"
@@ -117,7 +119,6 @@ class CompilationOfCallbacks(Callback):
                 handle.write("Early stopping because patience exceeded\n")
                 handle.close()
                 sys.exit(0)
-            self.wait += 1
 
     def on_train_end(self, logs={}):
         '''
@@ -305,9 +306,10 @@ class CompilationOfCallbacks(Callback):
         # incremented accordingly already in generate_sentences().)
         logger.info("Initialising with the first %d gold words (incl BOS)",
                     fixed_words)
-        input_data[0][:, fixed_words:, :] = 0
+        gen_input_data = deepcopy(input_data)
+        gen_input_data[0][:, fixed_words:, :] = 0
 
-        return input_data
+        return gen_input_data
 
 
     def generate_sentences(self, filepath, val=True):
@@ -325,7 +327,6 @@ class CompilationOfCallbacks(Callback):
         TODO: duplicated method with generate.py
         """
         prefix = "val" if val else "test"
-        logger.info("Generating %s sentences from this model\n", prefix)
         handle = codecs.open("%s/%sGenerated" % (filepath, prefix), "w",
                              'utf-8')
 
@@ -389,7 +390,7 @@ class CompilationOfCallbacks(Callback):
         """ Without batching. Robust against multiple descriptions/image,
         since it uses data_generator.get_data_by_split input. """
         prefix = "val" if val else "test"
-        logger.debug("Calculating pplx over %s data", prefix)
+        logger.info("Calculating pplx over %s data", prefix)
         sum_logprobs = 0
         y_len = 0
         input_data, Y_target = self.data_generator.get_data_by_split(prefix,
@@ -414,5 +415,5 @@ class CompilationOfCallbacks(Callback):
 
         norm_logprob = sum_logprobs / y_len
         pplx = math.pow(2, norm_logprob)
-        logger.debug("PPLX: %.4f", pplx)
+        logger.info("PPLX: %.4f", pplx)
         return pplx
