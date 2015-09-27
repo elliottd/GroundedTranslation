@@ -481,16 +481,6 @@ class VisualWordDataGenerator(object):
         #logger.debug("Number of indices %d", len(self.index2word))
         #logger.debug("index2word: %s", self.index2word.items())
 
-    def vectorise_image_descriptions(self, image, index, description_array):
-        """ Update description_array with descriptions belonging to image.
-        Array format: description_array[desc_index, timestep, word_index]
-        """
-        for sentence in image['sentences'][0:self.num_sents]:
-            seq = self.format_sequence(sentence['tokens'])
-            description_array[index, :, :] = seq
-            index += 1
-        return index
-
     def format_sequence(self, sequence):
         """ Transforms one sequence (description) into input matrix
         (timesteps, vocab-onehot)
