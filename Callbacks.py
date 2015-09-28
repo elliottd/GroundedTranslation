@@ -97,10 +97,10 @@ class CompilationOfCallbacks(Callback):
         self.generate_sentences(path)
         val_bleu = self.__bleu_score__(path)
 
-        self.early_stop_decision(len(self.val_bleu)+1, val_bleu)
+        self.early_stop_decision(len(self.val_bleu)+1, val_bleu, val_pplx)
         self.checkpoint_parameters(epoch, logs, path, val_bleu, val_pplx)
 
-    def early_stop_decision(self, epoch, val_bleu):
+    def early_stop_decision(self, epoch, val_bleu, val_pplx):
         '''
         Stop training if validation BLEU score has not increased for
         --patience epochs.
@@ -113,12 +113,15 @@ class CompilationOfCallbacks(Callback):
         else:
             self.wait += 1
             if self.wait >= self.patience:
-                logger.info("Epoch %d: early stopping", epoch)
-                handle = open("checkpoints/%s/summary"
-                              % self.args.run_string, "a")
-                handle.write("Early stopping because patience exceeded\n")
-                handle.close()
-                sys.exit(0)
+                # we have exceeded patience
+                if val_pplx > self.best_val_pplx:
+                    # and pplx is no longer decreasing
+                    logger.info("Epoch %d: early stopping", epoch)
+                    handle = open("checkpoints/%s/summary"
+                                  % self.args.run_string, "a")
+                    handle.write("Early stopping because patience exceeded\n")
+                    handle.close()
+                    sys.exit(0)
 
     def on_train_end(self, logs={}):
         '''
@@ -227,7 +230,7 @@ class CompilationOfCallbacks(Callback):
             os.mkdir(filepath)
         except OSError:
             pass  # directory already exists
-        print("In %s ...\n" % filepath)
+        logger.info("In %s ...",filepath)
         return filepath
 
     def save_run_arguments(self, filepath):
@@ -256,14 +259,14 @@ class CompilationOfCallbacks(Callback):
             if cur_val_loss < self.best_val_loss:
                 self.best_val_loss = cur_val_loss
 
-            logger.info("Checkpoint %d: | val loss %0.5f (best: %0.5f) bleu\
-                        %0.2f (best %0.2f)", (len(self.val_loss) + 1),
+            logger.info("Checkpoint %d: | val loss %0.5f (best: %0.5f) bleu %0.2f (best %0.2f)", 
+                        (len(self.val_loss) + 1),
                         cur_val_loss, self.best_val_loss, cur_val_bleu,
                         self.best_val_bleu)
 
         if self.args.enable_val_pplx:
-            logger.info("Checkpoint %d: | val pplx %0.5f (best: %0.5f) bleu\
-                        %0.2f (best %0.2f)", (len(self.val_pplx) + 1),
+            logger.info("Checkpoint %d: | val pplx %0.5f (best: %0.5f) bleu %0.2f (best %0.2f)", 
+                        (len(self.val_pplx) + 1),
                         cur_val_pplx, self.best_val_pplx, cur_val_bleu,
                         self.best_val_bleu)
             self.val_pplx.append(cur_val_pplx)
@@ -311,7 +314,6 @@ class CompilationOfCallbacks(Callback):
 
         return gen_input_data
 
-
     def generate_sentences(self, filepath, val=True):
         """
         Generates descriptions of images for --generation_timesteps
@@ -329,19 +331,14 @@ class CompilationOfCallbacks(Callback):
         prefix = "val" if val else "test"
         handle = codecs.open("%s/%sGenerated" % (filepath, prefix), "w",
                              'utf-8')
+        logger.info("Generating %s descriptions", prefix)
 
         start_gen = self.args.generate_from_N_words # Default 0
-        if start_gen > 0:
-            logger.info("Generating after %d true words of history",
-                        start_gen)
         start_gen = start_gen + 1  # include BOS
 
         # prepare the datastructures for generation (no batching over val)
         arrays = self.make_generation_arrays(prefix, start_gen)
         N_sents= arrays[0].shape[0]
-
-        # holds the sentences as words instead of indices
-        logger.info("Generating over %d sentences", N_sents)
 
         # complete_sentences = [["<S>"] for _ in range(N_sents)]
 
