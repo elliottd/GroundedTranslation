@@ -71,19 +71,12 @@ class VisualWordLSTM(object):
         else:
             hsn_size = self.data_generator.hsn_size  # ick
 
-        if self.args.num_layers == 1:
-            m = models.OneLayerLSTM(self.args.hidden_size, self.V,
-                                    self.args.dropin,
-                                    self.args.optimiser, self.args.l2reg,
-                                    hsn_size=hsn_size,
-                                    weights=self.args.init_from_checkpoint,
-                                    gru=self.args.gru)
-        else:
-            m = models.TwoLayerLSTM(self.args.hidden_size, self.V,
-                                    self.args.dropin, self.args.droph,
-                                    self.args.optimiser, self.args.l2reg,
-                                    hsn_size=hsn_size,
-                                    weights=self.args.init_from_checkpoint)
+        m = models.OneLayerLSTM(self.args.hidden_size, self.V,
+                                self.args.dropin,
+                                self.args.optimiser, self.args.l2reg,
+                                hsn_size=hsn_size,
+                                weights=self.args.init_from_checkpoint,
+                                gru=self.args.gru)
 
         model = m.buildKerasModel(use_sourcelang=self.use_sourcelang,
                                   use_image=self.use_image)
@@ -215,11 +208,6 @@ if __name__ == "__main__":
     parser.add_argument("--hidden_size", default=512, type=int)
     parser.add_argument("--dropin", default=0.5, type=float,
                         help="Prob. of dropping embedding units. Default=0.5")
-    parser.add_argument("--droph", default=0.2, type=float,
-                        help="Prob. of dropping hidden units. Default=0.2")
-    parser.add_argument("--num_layers", default=1, type=int,
-                        help="Number of layers in the LSTM (default=1),\
-                        options = 1 or 2")
     parser.add_argument("--gru", action="store_true", help="Use GRU instead\
                         of LSTM recurrent state? (default = False)")
 
@@ -231,11 +219,6 @@ if __name__ == "__main__":
     parser.add_argument("--epsilon", default=None, type=float)
     parser.add_argument("--stopping_loss", default="bleu", type=str,
                         help="minimise cross-entropy or maximise BLEU?")
-    parser.add_argument("--checkpointing", default=100, type=int,
-                        help="regularity of checkpointing model parameters,\
-                              as a percentage of the training data size\
-                              (dataset + supertrain_datasets). (defaults to\
-                              only checkpointing at the end of each epoch)")
     parser.add_argument("--l2reg", default=1e-8, type=float,
                         help="L2 cost penalty. Default=1e-8")
 

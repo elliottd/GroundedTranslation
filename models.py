@@ -5,7 +5,6 @@ from keras.regularizers import l2
 from keras.optimizers import Adam
 
 import h5py
-import math
 import shutil
 import logging
 
@@ -70,7 +69,7 @@ class OneLayerLSTM:
                 model.add(Merge([text, visual], mode='sum'))
             elif use_sourcelang:
                 model.add(Merge([text, source_hidden], mode='sum'))
-            else: # text sequence model (e.g. source encoder in MT_baseline)
+            else:  # text sequence model (e.g. source encoder in MT_baseline)
                 assert not use_sourcelang and not use_image
                 model.add(text)
 
