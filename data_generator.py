@@ -134,7 +134,8 @@ class VisualWordDataGenerator(object):
                                     IMG_FEATS)))
         return arrays
 
-    def yield_training_batch(self, big_batch_size, use_sourcelang=False, use_image=True):
+    def yield_training_batch(self, big_batch_size, use_sourcelang=False,
+                             use_image=True, return_keys=False):
         """
         Returns a batch of training examples.
 
@@ -148,6 +149,9 @@ class VisualWordDataGenerator(object):
         num_descriptions = 0  # total num descriptions found so far.
         batch_max_seq_len = 0
         discarded = 0  # total num of discards
+        # KEYS ARE OVER IMAGES NOT DESCRIPTIONS
+        # THIS WILL BREAK IF THERE ARE MULTIPLE DESCRIPTIONS/IMAGE
+        keys = []
         if use_sourcelang and use_image:  # where is image array in arrays.
             img_idx = 2
         else:
@@ -172,7 +176,11 @@ class VisualWordDataGenerator(object):
                             arrays[i] = arr[:, :(batch_max_seq_len + 3), :]
                         targets = self.get_target_descriptions(arrays[0])
 
-                        yield (arrays, targets, num_descriptions == training_size)
+                        if return_keys:
+                            yield (arrays, targets, num_descriptions ==
+                                   training_size, keys)
+                        else:
+                            yield (arrays, targets, num_descriptions == training_size)
 
                         # Testing multiple big batches
                         if self.small and num_descriptions >= training_size:
@@ -188,6 +196,7 @@ class VisualWordDataGenerator(object):
                             logger.info("Creating (truncated) final big batch, size %d", this_bbs)
                         arrays = self.get_new_training_arrays(this_bbs,
                                                               use_sourcelang, use_image)
+                        keys = []
 
                     if len(description.split()) > batch_max_seq_len:
                         batch_max_seq_len = len(description.split())
@@ -203,6 +212,7 @@ class VisualWordDataGenerator(object):
                             arrays[img_idx][batch_index, 0, :] =\
                                 self.get_image_features(dataset, 'train', data_key)
                         num_descriptions += 1
+                        keys.append(data_key)
                     except AssertionError:
                         # thrown by format_sequence() when we cannot encode
                         # any words in the sentence
@@ -231,12 +241,16 @@ class VisualWordDataGenerator(object):
             for i, arr in enumerate(arrays):
                 arrays[i] = arr[:, :(batch_max_seq_len + 3), :]
             targets = self.get_target_descriptions(arrays[0])
-            # this will do validataion at the end of every training dataset (in supertraining)
-            yield (arrays, targets, True)
+            # this will do validation at the end of every training dataset (in supertraining)
+            if return_keys:
+                yield (arrays, targets, True, keys)
+            else:
+                yield (arrays, targets, True)
             # For next dataset (i.e. if supertraining)
             arrays = self.get_new_training_arrays(
                 big_batch_size, use_sourcelang, use_image)
             discarded = 0
+            keys = []
 
     def resize_arrays(self, new_size, arrays):
         """

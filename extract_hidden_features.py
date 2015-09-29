@@ -76,10 +76,12 @@ class ExtractFinalHiddenActivations:
             hidden_states = []
             batch_start = 0
             batch_end = 0
-            for train_input, trainY, indicator in\
+            for train_input, trainY, indicator, keys in\
                 self.data_generator.yield_training_batch(self.args.big_batch_size,
                                                          self.use_sourcelang,
-                                                         self.use_image):
+                                                         self.use_image,
+                                                         return_keys=True):
+                print(keys)
                 hsn = self.model.predict(train_input,
                                          batch_size=self.args.batch_size,
                                          verbose=1)
@@ -97,13 +99,17 @@ class ExtractFinalHiddenActivations:
 
                 # Note: serialisation happens over training batches too.
                 # now serialise the hidden representations in the h5
-                self.serialise_to_h5(split, len(hidden_states[0]), hidden_states,
-                                     batch_start, batch_end)
+                #self.serialise_to_h5(split, len(hidden_states[0]), hidden_states,
+                #                     batch_start, batch_end)
+                # KEYS ARE OVER IMAGES NOT DESCRIPTIONS
+                # THIS WILL BREAK IF THERE ARE MULTIPLE DESCRIPTIONS/IMAGE
+                self.serialise_to_h5_keys(split, keys, hidden_states)
 
                 batch_start = batch_end
                 hidden_states = []
 
         elif split == 'val':
+            # TODO: get keys and do serialise_to_h5 with keys.
             val_input, valY = self.data_generator.get_data_by_split('val',
                 self.use_sourcelang, self.use_image)
             logger.info("Generating hsn activations from this model for val\n")
@@ -126,10 +132,34 @@ class ExtractFinalHiddenActivations:
             # now serialise the hidden representations in the h5
             self.serialise_to_h5(split, len(hidden_states[0]), hidden_states)
 
+    def serialise_to_h5_keys(self, split, data_keys, hidden_states):
+        hsn_shape = len(hidden_states[0])
+        fhf_str = "final_hidden_features"
+        logger.info("Serialising final hidden state features from %s to H5",
+                    split)
+        for idx, data_key in enumerate(data_keys):
+            try:
+                hsn_data = self.data_generator.dataset[split][data_key].create_dataset(
+                    fhf_str, (hsn_shape,), dtype='float32')
+            except RuntimeError:
+                # the dataset already exists, retrieve it into RAM and then overwrite it
+                del self.data_generator.dataset[split][data_key][fhf_str]
+                hsn_data = self.data_generator.dataset[split][data_key].create_dataset(
+                    fhf_str, (hsn_shape,), dtype='float32')
+            try:
+                hsn_data[:] = hidden_states[idx]
+            except IndexError:
+                raise IndexError("data_key %s of %s; index idx %d, len hidden %d" % (
+                    data_key, len(data_keys), idx, len(hidden_states)))
+                break
+
     def serialise_to_h5(self, split, hsn_shape, hidden_states,
                         batch_start=None, batch_end=None):
         """ Serialise the hidden representations from generate_activations
-        into the h5 dataset."""
+        into the h5 dataset.
+        This assumes one hidden_state per image key, which is maybe not
+        appropriate if there are multiple descriptions/image.
+        """
         idx = 0
         logger.info("Serialising final hidden state features from %s to H5",
                     split)
