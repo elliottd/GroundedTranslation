@@ -218,6 +218,11 @@ class VisualWordDataGenerator(object):
                         # any words in the sentence
                         discarded += 1
                         continue
+                    except KeyError:
+                        # thrown by get_hsn_features() when we cannot retrieve
+                        # a source-language feature vector
+                        discarded += 1
+                        continue
 
             # End of looping through a dataset (may be one of many).
             # Yield final batch for this dataset.
@@ -381,8 +386,15 @@ class VisualWordDataGenerator(object):
 
     def get_hsn_features(self, split, data_key):
         """ Return image features vector for split[data_key]."""
-        return floatX(self.source_dataset[split][data_key]
-                      ['final_hidden_features'])
+        try:
+            return floatX(self.source_dataset[split][data_key]
+                          ['final_hidden_features'])
+        except KeyError:
+            # this image -- description pair doesn't have a source-language
+            # vector. Raise a KeyError so the requester can deal with the
+            # missing data.
+            logger.warning("Skipping '%s' because it doesn't have a source vector", data_key)
+            raise KeyError
 
     def get_image_features(self, dataset, split, data_key):
         """ Return image features vector for split[data_key]."""
@@ -491,9 +503,28 @@ class VisualWordDataGenerator(object):
 
         logger.info("Number of words %d -> %d", len(unk_dict),
                     len(self.word2index))
+        actual_len, true_len = self.discard_percentage()
+        logger.info("Retained / Original Tokens: %d / %d (%.2f pc)",
+                    actual_len, true_len, 100 * float(actual_len)/true_len)
         #logger.debug("word2index %s", self.word2index.items())
         #logger.debug("Number of indices %d", len(self.index2word))
         #logger.debug("index2word: %s", self.index2word.items())
+
+    def discard_percentage(self):
+        '''
+        One-off calculation of how many words are throw-out from the training
+        sequences using the defined UNK threshold.
+        '''
+        true_len = 0
+        actual_len = 0
+        split = 'train'
+        for data_key in self.dataset[split]:
+            for description in self.dataset[split][data_key]['descriptions'][0:self.args_dict.num_sents]:
+                d = description.split()
+                true_len += len(d)
+                unk_d = [self.word2index[w] for w in d if w in self.word2index]
+                actual_len += len(unk_d)
+        return (actual_len, true_len)
 
     def format_sequence(self, sequence):
         """ Transforms one sequence (description) into input matrix

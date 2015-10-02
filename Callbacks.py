@@ -148,6 +148,8 @@ class CompilationOfCallbacks(Callback):
                              % (epoch+1, self.val_loss[epoch],
                                 self.val_bleu[epoch]))
 
+        logger.info("---")  # break up the presentation for clarity
+
         # BLEU is the quickest indicator of performance for our task
         # but PPLX (2^loss) is our objective function
         best_bleu = np.nanargmax(self.val_bleu)

@@ -81,7 +81,6 @@ class ExtractFinalHiddenActivations:
                                                          self.use_sourcelang,
                                                          self.use_image,
                                                          return_keys=True):
-                print(keys)
                 hsn = self.model.predict(train_input,
                                          batch_size=self.args.batch_size,
                                          verbose=1)
