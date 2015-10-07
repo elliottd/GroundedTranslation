@@ -113,8 +113,12 @@ class VisualWordLSTM(object):
                                                          self.use_sourcelang,
                                                          self.use_image):
 
-                logger.info("Epoch %d/%d, big-batch %d/%d", epoch+1,
-                            self.args.epochs, batch, batches)
+                if self.args.predefined_epochs:
+                    logger.info("Epoch %d/%d, big-batch %d/%d", epoch+1,
+                                self.args.max_epochs, batch, batches)
+                else:
+                    logger.info("Epoch %d, big-batch %d/%d", epoch+1,
+                                batch, batches)
 
                 if indicator is True:
                     # let's test on the val after training on these batches
@@ -137,6 +141,9 @@ class VisualWordLSTM(object):
                               shuffle=True)
                 batch += 1
             epoch += 1
+            if self.args.predefined_epochs and epoch >= self.args.max_epochs:
+                # stop training because we've exceeded self.args.max_epochs
+                break
 
     def log_run_arguments(self):
         '''
@@ -200,7 +207,13 @@ if __name__ == "__main__":
                         help="Number of examples to load from disk at a time;\
                         0 loads entire dataset. Default is 10000")
 
-    parser.add_argument("--epochs", default=50, type=int)
+    parser.add_argument("--predefined_epochs", action="store_true",
+                        help="Do you want to stop training after a specified\
+                        number of epochs, regardless of early-stopping\
+                        criteria? Use in conjunction with --max_epochs.")
+    parser.add_argument("--max_epochs", default=50, type=int,
+                        help="Maxmimum number of training epochs. Used with\
+                        --predefined_epochs")
     parser.add_argument("--patience", type=int, default=10, help="Training\
                         will be terminated if validation BLEU score does not\
                         increase for this number of epochs")
