@@ -159,7 +159,7 @@ class VisualWordDataGenerator(object):
         # Iterate over *images* in training splits
         for dataset in self.datasets:
             #training_size = self.split_sizes['train'] # this won't work with multiple datasets
-            training_size = len(dataset['train'])
+            training_size = self.split_sizes['train']
             logging.info("training size %d", training_size)
             if self.small:
                 training_size = SMALL_NUM_DESCRIPTIONS
@@ -234,8 +234,8 @@ class VisualWordDataGenerator(object):
 #               logging.warn("resizing final batch", batch_index,
 #                            num_descriptions)
 #               arrays = self.resize_arrays(batch_index, arrays)
-            assert batch_index == arrays[0].shape[0],\
-                    "Filled array %d, size %d" % (batch_index, arrays[0].shape[0])
+            #assert batch_index == arrays[0].shape[0],\
+            #        "Filled array %d, size %d" % (batch_index, arrays[0].shape[0])
             assert num_descriptions == training_size - discarded,\
                     "Yielded %d descriptions, train size %d (%d)" % (
                         num_descriptions,  training_size, self.split_sizes['train'])
