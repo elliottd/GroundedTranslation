@@ -5,6 +5,8 @@ import theano
 
 import argparse
 import logging
+import itertools
+from copy import deepcopy
 
 from data_generator import VisualWordDataGenerator
 import models
@@ -21,6 +23,7 @@ class ExtractFinalHiddenActivations:
 
     def __init__(self, args):
         self.args = args
+        self.args.generate_from_N_words = 0  # Default 0
         self.vocab = dict()
         self.unkdict = dict()
         self.counter = 0
@@ -54,12 +57,15 @@ class ExtractFinalHiddenActivations:
                                 weights=self.args.checkpoint,
                                 gru=self.args.gru)
 
-        self.model = m.buildHSNActivations(self.use_image)
+        self.fhs = m.buildHSNActivations(self.use_image)
+        if self.args.use_predicted_tokens:
+            self.full_model = m.buildKerasModel(use_image=self.use_image)
 
         self.generate_activations('train')
         self.generate_activations('val')
+        self.generate_activations('test')
 
-    def generate_activations(self, split, gold=True):
+    def generate_activations(self, split):
         '''
         Generate and serialise final-timestep hidden state activations
         into --dataset.
@@ -81,9 +87,11 @@ class ExtractFinalHiddenActivations:
                                                          self.use_sourcelang,
                                                          self.use_image,
                                                          return_keys=True):
-                hsn = self.model.predict(train_input,
-                                         batch_size=self.args.batch_size,
-                                         verbose=1)
+
+                # We extract the FHS from oracle training input tokens
+                hsn = self.fhs.predict(train_input,
+                                       batch_size=self.args.batch_size,
+                                       verbose=1)
 
                 for idx, h in enumerate(hsn):
                     # get final_hidden index on a sentence-by-sentence
@@ -107,16 +115,24 @@ class ExtractFinalHiddenActivations:
                 batch_start = batch_end
                 hidden_states = []
 
-        elif split == 'val':
+        elif split == 'val' or split == "test":
             # TODO: get keys and do serialise_to_h5 with keys.
-            val_input, valY = self.data_generator.get_data_by_split('val',
-                self.use_sourcelang, self.use_image)
-            logger.info("Generating hsn activations from this model for val\n")
+            val_input, valY = self.data_generator.get_data_by_split(split,
+                                      self.use_sourcelang, self.use_image)
+            logger.info("Generating hsn activations from this model for %s\n" % split)
 
             hidden_states = []
-            hsn = self.model.predict(val_input,
-                                     batch_size=self.args.batch_size,
-                                     verbose=1)
+            # We can extract the FGS from either oracle or predicted word
+            # sequences for val  / test data .
+            if self.args.use_predicted_tokens:
+                predicted_words = self.generate_sentences(split == split)
+                val_input, valY = self.make_generation_arrays(split,
+                                         self.args.generate_from_N_words,
+                                         predicted_tokens=predicted_words)
+
+            hsn = self.fhs.predict(val_input,
+                                   batch_size=self.args.batch_size,
+                                   verbose=1)
 
             for idx, h in enumerate(hsn):
                 # get final_hidden index on a sentence-by-sentence
@@ -124,12 +140,98 @@ class ExtractFinalHiddenActivations:
                 for widx, warr in enumerate(valY[idx]):
                     w = np.argmax(warr)
                     if self.data_generator.index2word[w] == "<E>":
+                        logger.info("Sentence length %d", widx)
                         final_hidden = h[widx]
                         hidden_states.append(final_hidden)
                         break
 
             # now serialise the hidden representations in the h5
             self.serialise_to_h5(split, len(hidden_states[0]), hidden_states)
+
+    def make_generation_arrays(self, prefix, fixed_words,
+                               predicted_tokens=None):
+        '''
+        Create arrays that are used as input for generation / activation.
+        '''
+
+        input_data, targets = self.data_generator.get_data_by_split(prefix,
+                                       self.use_sourcelang, self.use_image)
+
+        if predicted_tokens is not None:
+            logger.info("Initialising with model-predicted tokens")
+            gen_input_data = deepcopy(input_data)
+            tokens = gen_input_data[0]
+            tokens[:, fixed_words, :] = 0  # reset the inputs
+            for prediction, words, tgt in zip(predicted_tokens, tokens, targets):
+                for idx, t in enumerate(prediction):
+                    words[idx, self.data_generator.word2index[t]] = 1.
+            targets = self.data_generator.get_target_descriptions(tokens)
+            return gen_input_data, targets
+
+        else:
+            # Replace input words (input_data[0]) with zeros for generation,
+            # except for the first args.generate_from_N_words
+            # NOTE: this will include padding and BOS steps (fixed_words has been
+            # incremented accordingly already in generate_sentences().)
+            logger.info("Initialising with the first %d gold words (incl BOS)",
+                        fixed_words)
+            gen_input_data = deepcopy(input_data)
+            gen_input_data[0][:, fixed_words:, :] = 0
+            return gen_input_data
+
+    def generate_sentences(self, val=True):
+        """
+        Generates descriptions of images for --generation_timesteps
+        iterations through the LSTM. Each input description is clipped to
+        the first <BOS> token, or, if --generate_from_N_words is set, to the
+        first N following words (N + 1 BOS token).
+        This process can be additionally conditioned
+        on source language hidden representations, if provided by the
+        --source_vectors parameter.
+        The output is clipped to the first EOS generated, if it exists.
+
+        TODO: beam search
+        TODO: duplicated method with generate.py
+        """
+        prefix = "val" if val else "test"
+        logger.info("First generating %s descriptions", prefix)
+
+        start_gen = self.args.generate_from_N_words  # Default 0
+        start_gen = start_gen + 1  # include BOS
+
+        # prepare the datastructures for generation (no batching over val)
+        arrays = self.make_generation_arrays(prefix, start_gen)
+        N_sents = arrays[0].shape[0]
+
+        complete_sentences = [[] for _ in range(N_sents)]
+        for t in range(start_gen):  # minimum 1
+            for i in range(N_sents):
+                w = np.argmax(arrays[0][i, t])
+                complete_sentences[i].append(self.data_generator.index2word[w])
+
+        for t in range(start_gen, self.args.generation_timesteps):
+            # we take a view of the datastructures, which means we're only
+            # ever generating a prediction for the next word. This saves a
+            # lot of cycles.
+            preds = self.full_model.predict([arr[:, 0:t] for arr in arrays],
+                                            verbose=0)
+
+            # Look at the last indices for the words.
+            next_word_indices = np.argmax(preds[:, -1], axis=1)
+            # update array[0]/sentence-so-far with generated words.
+            for i in range(N_sents):
+                arrays[0][i, t, next_word_indices[i]] = 1.
+            next_words = [self.data_generator.index2word[x] for x in next_word_indices]
+            for i in range(len(next_words)):
+                complete_sentences[i].append(next_words[i])
+
+        # extract each sentence until it hits the first end-of-string token
+        pruned_sentences = []
+        for s in complete_sentences:
+            pruned_sentences.append([x for x
+                                     in itertools.takewhile(
+                                         lambda n: n != "<E>", s)])
+        return pruned_sentences
 
     def serialise_to_h5_keys(self, split, data_keys, hidden_states):
         hsn_shape = len(hidden_states[0])
@@ -174,6 +276,9 @@ class ExtractFinalHiddenActivations:
             data_keys = self.data_generator.dataset[split]
             if split == 'val' and self.args.small_val:
                 data_keys = ["%06d" % x for x in range(len(hidden_states))]
+            else:
+                data_keys = ["%06d" % x for x in range(len(hidden_states))]
+            logger.info(data_keys)
         for data_key in data_keys:
             try:
                 hsn_data = self.data_generator.dataset[split][data_key].create_dataset(
@@ -248,6 +353,11 @@ if __name__ == "__main__":
                         encoder/source language VisualWordLSTM model.\
                         (default: None.) Expects a final_hidden_representation\
                         vector for each image in the dataset")
+
+    parser.add_argument("--use_predicted_tokens", action="store_true",
+                        help="Generate final hidden state\
+                        activations over oracle inputs or from predicted\
+                        inputs? Default = False ( == Oracle)")
 
     w = ExtractFinalHiddenActivations(parser.parse_args())
     w.get_hsn_activations()

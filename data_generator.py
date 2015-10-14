@@ -91,7 +91,7 @@ class VisualWordDataGenerator(object):
             self.source_dataset = h5py.File("%s/dataset.h5"
                                             % self.args_dict.source_vectors,
                                             "r")
-            self.hsn_size = len(self.source_dataset['train']['000000']
+            self.hsn_size = len(self.source_dataset['val']['000000']
                                 ['final_hidden_features'])
             logger.info("Available sourcelang/HSN input: size %d", self.hsn_size)
 
@@ -107,6 +107,7 @@ class VisualWordDataGenerator(object):
         # This counts number of descriptions per split
         # Ignores test for now (change in extract_vocabulary)
         self.split_sizes = {'train': 0, 'val': 0, 'test': 0}
+        self.calculate_split_sizes()
 
         # These are used to speed up the validation process
         self._cached_val_input = None
@@ -290,8 +291,82 @@ class VisualWordDataGenerator(object):
             if self.args_dict.small_val and split == 'val':
                 if len(references) >= SMALL_VAL:
                     break
-        self._cached_references = references
+
+        if split == "val":
+            self._cached_references = references
         return references
+
+    def get_generation_data_by_split(self, split, use_sourcelang=False,
+                                     use_image=True):
+        """ Gets all input data for model for a given split (ie. train, val,
+        test).
+        Returns tuple containing a list of training input arrays (depending on
+        use_sourcelang and use_image) and a target array.
+        Training arrays may contain (in this order)
+            descriptions: input array for text LSTM [item, timestep,
+                vocab_onehot] (necessary)
+            source language:  input array of hidden state vectors for source
+                language features (optional)
+            image: input array of image features [item, timestep, img_feats at
+                    timestep=0 else 0] (optional)
+        Targets: target array for text LSTM (same format and data as
+                descriptions, timeshifted)
+
+        Changed: If small_val is set, the original arrays are now also a bit
+        smaller than split_size (and then truncated to d_idx, as before). This
+        is so I can run this on a lower-memory machine without thrashing.
+        """
+
+        logger.info("Making generation data for %s", split)
+        if len(self.datasets) > 1 and split == "train":
+            logger.warn("Called get_data_by_split on train while supertraining;\
+                        this is probably NOT WHAT YOU INTENDED")
+
+        split_size = self.split_sizes[split]
+        intended_size = np.inf
+        if self.args_dict.small_val:
+            intended_size = SMALL_VAL
+            # Make split_size comfortably bigger than intended_size
+            split_size = 2 * SMALL_VAL * self.args_dict.num_sents
+
+        arrays = self.get_new_training_arrays(split_size, use_sourcelang,
+                                              use_image)
+
+        if use_sourcelang and use_image:  # where is image array in arrays.
+            img_idx = 2
+        else:
+            img_idx = 1
+
+        d_idx = 0  # description index
+        for data_key in self.dataset[split]:
+            descriptions = self.dataset[split][data_key]['descriptions']
+            # we only want one instance per image for generation
+            for d in descriptions[0:1]:
+                arrays[0][d_idx, :, :] = self.format_sequence(d.split())
+                if use_sourcelang:  # XXX ATTENTION this was originally self.hsn
+                    arrays[1][d_idx, 0, :] = self.get_hsn_features(split, data_key)
+                if use_image:
+                    # img_idx can be 1 or 2, depending on use_sourcelang
+                    arrays[img_idx][d_idx, 0, :] = self.get_image_features(
+                        self.dataset, split, data_key)
+                d_idx += 1
+            if d_idx >= intended_size:
+                break
+
+        # probably need to resize arrays for the generation data
+        if self.args_dict.small_val or d_idx < split_size:
+            # d_idx (number of descriptions before break) is new size.
+            arrays = self.resize_arrays(d_idx, arrays)
+
+        targets = self.get_target_descriptions(arrays[0])
+
+        logger.debug("actual max_seq_len in split %s: %d",
+                    split, self.actual_max_seq_len)
+        logger.debug("dscrp_array size: %s", arrays[0].shape)
+        # TODO: truncate dscrp_array, img_array, targets
+        # to actual_max_seq_len (+ padding)
+
+        return (arrays, targets)
 
     def get_data_by_split(self, split, use_sourcelang=False, use_image=True):
         """ Gets all input data for model for a given split (ie. train, val,
@@ -363,8 +438,9 @@ class VisualWordDataGenerator(object):
         # TODO: truncate dscrp_array, img_array, targets
         # to actual_max_seq_len (+ padding)
 
-        self._cached_val_input = arrays
-        self._cached_val_targets = targets
+        if split == "val":
+            self._cached_val_input = arrays
+            self._cached_val_targets = targets
 
         return (arrays, targets)
 
@@ -439,9 +515,15 @@ class VisualWordDataGenerator(object):
                     d = description.split()
                     if len(d) > longest_sentence:
                         longest_sentence = len(d)
-                    self.split_sizes[split] += 1
 
         return longest_sentence
+
+    def calculate_split_sizes(self):
+        for split in ["train", "val", "test"]:
+            for dataset in self.datasets:
+                for data_key in dataset[split]:
+                    for description in dataset[split][data_key]['descriptions'][0:self.args_dict.num_sents]:
+                        self.split_sizes[split] += 1
 
     def extract_vocabulary(self):
         '''

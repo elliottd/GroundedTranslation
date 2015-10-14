@@ -188,8 +188,8 @@ class CompilationOfCallbacks(Callback):
 
         for refid in xrange(len(references[0])):
             codecs.open('%s/%s_reference.ref%d' % (directory, split, refid),
-                        #'w', 'utf-8').write('\n'.join([x[refid] for x in references]))
-                        'w', 'utf-8').write('\n'.join(['\n'.join(x) for x in references]))
+                        'w', 'utf-8').write('\n'.join([x[refid] for x in references]))
+                        #'w', 'utf-8').write('\n'.join(['\n'.join(x) for x in references]))
 
     def __bleu_score__(self, directory, val=True):
         '''
@@ -298,12 +298,17 @@ class CompilationOfCallbacks(Callback):
             # yield split_indices[i:i+batch_size]
             yield (i, i+batch_size-1)
 
-    def make_generation_arrays(self, prefix, fixed_words):
+    def make_generation_arrays(self, prefix, fixed_words, generation=False):
         """Create arrays that are used as input for generation. """
 
         # Y_target is unused
-        input_data, _ = self.data_generator.get_data_by_split(prefix,
-                                       self.use_sourcelang, self.use_image)
+        if generation:
+            input_data, _ =\
+                self.data_generator.get_generation_data_by_split(prefix,
+                                    self.use_sourcelang, self.use_image)
+        else:
+            input_data, _ = self.data_generator.get_data_by_split(prefix,
+                                     self.use_sourcelang, self.use_image)
 
         # Replace input words (input_data[0]) with zeros for generation,
         # except for the first args.generate_from_N_words
@@ -335,19 +340,20 @@ class CompilationOfCallbacks(Callback):
                              'utf-8')
         logger.info("Generating %s descriptions", prefix)
 
-        start_gen = self.args.generate_from_N_words # Default 0
+        start_gen = self.args.generate_from_N_words  # Default 0
         start_gen = start_gen + 1  # include BOS
 
         # prepare the datastructures for generation (no batching over val)
-        arrays = self.make_generation_arrays(prefix, start_gen)
-        N_sents= arrays[0].shape[0]
+        arrays = self.make_generation_arrays(prefix, start_gen,
+                                             self.args.use_predicted_tokens)
+        N_sents = arrays[0].shape[0]
 
         # complete_sentences = [["<S>"] for _ in range(N_sents)]
 
         complete_sentences = [[] for _ in range(N_sents)]
-        for t in range(start_gen): # minimum 1
+        for t in range(start_gen):  # minimum 1
             for i in range(N_sents):
-                w = np.argmax(arrays[0][i,t])
+                w = np.argmax(arrays[0][i, t])
                 complete_sentences[i].append(self.index2word[w])
 
         logger.debug("Sentence 0 %s", complete_sentences[0])

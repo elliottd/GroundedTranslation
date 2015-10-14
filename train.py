@@ -244,5 +244,10 @@ if __name__ == "__main__":
                         help="Open the H5 file for write-access? Useful for\
                         serialising hidden states to disk. (default = False)")
 
+    parser.add_argument("--use_predicted_tokens", action="store_true",
+                        help="Generate final hidden state\
+                        activations over oracle inputs or from predicted\
+                        inputs? Default = False ( == Oracle)")
+
     model = VisualWordLSTM(parser.parse_args())
     model.train_model()
