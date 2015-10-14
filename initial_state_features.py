@@ -28,7 +28,7 @@ class ExtractMergeActivations:
 
         # consistent with models.py
         # maybe use_sourcelang isn't applicable here?
-        self.use_sourcelang = args.use_source_vectors
+        self.use_sourcelang = args.source_vectors is not None
         self.use_image = not args.no_image
 
         if self.args.debug:
