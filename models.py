@@ -158,3 +158,66 @@ class OneLayerLSTM:
             f.close()
 
         return model
+
+    def buildMergeActivations(self, use_image=True, use_sourcelang=False):
+        '''
+        Define the exact structure of your model here. We create an image
+        description generation model by merging the VGG image features with
+        a word embedding model, with an LSTM over the sequences.
+
+        The order in which these appear below (text, image) is _IMMUTABLE_.
+        '''
+
+        logger.info('Building Keras model...')
+
+        # We will learn word representations for each word
+        text = Sequential()
+        text.add(TimeDistributedDense(self.vocab_size, self.hidden_size,
+                                      W_regularizer=l2(self.l2reg)))
+        text.add(Dropout(self.dropin))
+
+        if use_sourcelang:
+            logger.info("... hsn: adding source language vector as input features")
+            source_hidden = Sequential()
+            source_hidden.add(TimeDistributedDense(self.hsn_size, self.hidden_size,
+                                                   W_regularizer=l2(self.l2reg)))
+            source_hidden.add(Dropout(self.dropin))
+
+        if use_image:
+            # Compress the 4096D VGG FC_15 features into hidden_size
+            logger.info("... visual: adding image features as input features")
+            visual = Sequential()
+            visual.add(TimeDistributedDense(4096, self.hidden_size,
+                                            W_regularizer=l2(self.l2reg)))
+            visual.add(Dropout(self.dropin))
+
+        # Model is a merge of the VGG features and the Word Embedding vectors
+        model = Sequential()
+        if use_sourcelang and use_image:
+            model.add(Merge([text, source_hidden, visual], mode='sum'))
+        else:
+            if use_image:
+                model.add(Merge([text, visual], mode='sum'))
+            elif use_sourcelang:
+                model.add(Merge([text, source_hidden], mode='sum'))
+            else: # text sequence model (e.g. source encoder in MT_baseline)
+                assert not use_sourcelang and not use_image
+                model.add(text)
+
+        model.compile(loss='categorical_crossentropy',
+                      optimizer=self.optimiser)
+
+        if self.weights is not None:
+            logger.info("... with weights defined in %s", self.weights)
+            # Initialise the weights of the model
+            shutil.copyfile("%s/weights.hdf5" % self.weights,
+                            "%s/weights.hdf5.bak" % self.weights)
+            f = h5py.File("%s/weights.hdf5" % self.weights)
+            for k in range(f.attrs['nb_layers']-3):
+                g = f['layer_{}'.format(k)]
+                weights = [g['param_{}'.format(p)]
+                           for p in range(g.attrs['nb_params'])]
+                model.layers[k].set_weights(weights)
+            f.close()
+
+        return model
