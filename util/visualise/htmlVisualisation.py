@@ -4,8 +4,7 @@ import argparse
 import codecs
 import pickle
 
-parser = argparse.ArgumentParser("Generate an HTML file visualising the\
-                                  output of different models")
+parser = argparse.ArgumentParser("Generate an HTML file visualising the output of different models")
 parser.add_argument("--images", required=True,
                     help="Image file names, one per line. Required.")
 parser.add_argument("--eng_vocab", required=True,
@@ -130,8 +129,10 @@ with doc.head:
 handle = codecs.open("val.html", "w", "utf-8")
 with doc:
     key = div(cls="text")
-    key.add(p("<b>MLM</b>: Multimodal Language Model"))
-    key.add(p("<b>LM</b>: Standard Language Model"))
+    key.add(p("<a href='http://arxiv.org/abs/1510.04709'>See the paper</a> for more details on the models"))
+    key.add(p("<b>MLM</b> is a Multimodal Language Model"))
+    key.add(p("<b>LM</b> is a Language Model"))
+    key.add(p("Underlined Reference words are out-of-vocabulary"))
     for idx, img_name in enumerate(image_names):
         with div(cls='instance'):
             h3(img_name)
@@ -139,15 +140,15 @@ with doc:
             left = div(cls="text")
             unkified = replace_unk(eng_ref[idx], eng_vocab)
             left.add(p("<b>Reference:</b> %s" % unkified))
-            left.add(p("<b>MLM:</b> %s" % eng_mono[idx]))
-            if eng_multi:
-                left.add(p("<b>MLM -> MLM:</b> %s" % eng_multi[idx]))
-            if eng_multi_noimage:
-                left.add(p("<b>MLM -> LM:</b> %s" % eng_multi_noimage[idx]))
+            left.add(p("<b>En MLM:</b> %s" % eng_mono[idx]))
             if eng_mtenc_mtdec:
-                left.add(p("<b>LM -> LM:</b> %s" % eng_mtenc_mtdec[idx]))
+                left.add(p("<b>De LM &rarr; En LM:</b> %s" % eng_mtenc_mtdec[idx]))
+            if eng_multi:
+                left.add(p("<b>De MLM &rarr; En MLM:</b> %s" % eng_multi[idx]))
             if eng_mtenc_visdec:
-                left.add(p("<b>LM -> MLM:</b> %s" % eng_mtenc_visdec[idx]))
+                left.add(p("<b>De LM &rarr; En MLM:</b> %s" % eng_mtenc_visdec[idx]))
+            if eng_multi_noimage:
+                left.add(p("<b>De MLM &rarr; En LM:</b> %s" % eng_multi_noimage[idx]))
 
             # Render the image
             # BUG: this URL will most likely be wrong because it takes the
@@ -159,19 +160,20 @@ with doc:
             right = div(cls="text")
             unkified = replace_unk(ger_ref[idx], ger_vocab)
             right.add(p("<b>Reference:</b> %s" % unkified))
-            right.add(p("<b>MLM:</b> %s" % ger_mono[idx]))
-            if ger_multi:
-                right.add(p("<b>MLM -> MLM:</b> %s" % ger_multi[idx]))
-            if ger_multi_noimage:
-                right.add(p("<b>MLM -> LM:</b> %s" % ger_multi_noimage[idx]))
+            right.add(p("<b>De MLM:</b> %s" % ger_mono[idx]))
             if ger_mtenc_mtdec:
-                right.add(p("<b>LM -> LM:</b> %s" % ger_mtenc_mtdec[idx]))
+                right.add(p("<b>En LM &rarr; De LM:</b> %s" % ger_mtenc_mtdec[idx]))
+            if ger_multi:
+                right.add(p("<b>En MLM &rarr; De MLM:</b> %s" % ger_multi[idx]))
             if ger_mtenc_visdec:
-                right.add(p("<b>LM -> MLM:</b> %s" % ger_mtenc_visdec[idx]))
+                right.add(p("<b>En LM &rarr; De MLM:</b> %s" % ger_mtenc_visdec[idx]))
+            if ger_multi_noimage:
+                right.add(p("<b>En MLM &rarr; De LM:</b> %s" % ger_multi_noimage[idx]))
 
 content = doc.render()
 content = content.replace("&lt;", "<")
 content = content.replace("&gt;", ">")
+content = content.replace("&amp;", "&")
 handle.write(content)
 
 handle.close()

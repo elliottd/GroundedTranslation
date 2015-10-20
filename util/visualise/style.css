@@ -12,15 +12,17 @@ div.instance
 div.text
 {
   width: 25%;
-  float: left;
   padding: 16px;
   text-align: left;
+  display: inline-block;
+  vertical-align: middle;
 }
 
 img
 {
-  width: 15%;
-  float: left;
+  width: 25%;
+  display: inline-block;
+  vertical-align: middle;
 }
 
 h3
