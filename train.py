@@ -3,9 +3,6 @@ Entry module and class module for training a VisualWordLSTM.
 """
 
 from __future__ import print_function
-#  uncomment for fixed-seed behaviour. useful for debugging.
-# import numpy as np
-# np.random.seed(1234)
 
 import theano
 import argparse
@@ -248,6 +245,14 @@ if __name__ == "__main__":
                         help="Generate final hidden state\
                         activations over oracle inputs or from predicted\
                         inputs? Default = False ( == Oracle)")
+    parser.add_argument("--fixed_seed", action="store_true",
+                        help="Start with a fixed random seed? Useful for\
+                        reproding experiments. (default = False)")
 
-    model = VisualWordLSTM(parser.parse_args())
+    arguments = parser.parse_args()
+    if arguments.fixed_seed:
+        import numpy as np
+        np.random.seed(1234)
+
+    model = VisualWordLSTM(arguments)
     model.train_model()
