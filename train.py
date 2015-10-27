@@ -4,7 +4,6 @@ Entry module and class module for training a VisualWordLSTM.
 
 from __future__ import print_function
 
-import theano
 import argparse
 import logging
 from math import ceil
@@ -254,5 +253,6 @@ if __name__ == "__main__":
         import numpy as np
         np.random.seed(1234)
 
+    import theano
     model = VisualWordLSTM(arguments)
     model.train_model()
