@@ -41,14 +41,16 @@ class OneLayerLSTM:
 
         # We will learn word representations for each word
         text = Sequential()
-        text.add(TimeDistributedDense(self.vocab_size, self.hidden_size,
+        text.add(TimeDistributedDense(output_dim=self.hidden_size,
+                                      input_dim=self.vocab_size,
                                       W_regularizer=l2(self.l2reg)))
         text.add(Dropout(self.dropin))
 
         if use_sourcelang:
             logger.info("... hsn: adding source language vector as input features")
             source_hidden = Sequential()
-            source_hidden.add(TimeDistributedDense(self.hsn_size, self.hidden_size,
+            source_hidden.add(TimeDistributedDense(ouptut_dim=self.hsn_size,
+                                                   input_size=self.hidden_size,
                                                    W_regularizer=l2(self.l2reg)))
             source_hidden.add(Dropout(self.dropin))
 
@@ -56,7 +58,8 @@ class OneLayerLSTM:
             # Compress the 4096D VGG FC_15 features into hidden_size
             logger.info("... visual: adding image features as input features")
             visual = Sequential()
-            visual.add(TimeDistributedDense(4096, self.hidden_size,
+            visual.add(TimeDistributedDense(output_dim=self.hidden_size,
+                                            input_dim=4096,
                                             W_regularizer=l2(self.l2reg)))
             visual.add(Dropout(self.dropin))
 
@@ -74,17 +77,33 @@ class OneLayerLSTM:
                 model.add(text)
 
         if self.gru:
-            model.add(GRU(self.hidden_size, self.hidden_size,  # GRU layer
+            model.add(GRU(output_dim=self.hidden_size,
+                          input_dim=self.hidden_size,
                           return_sequences=True))
         else:
-            model.add(LSTM(self.hidden_size, self.hidden_size,  # LSTM layer
+            model.add(LSTM(output_dim=self.hidden_size,
+                           input_dim=self.hidden_size,
                            return_sequences=True))
-        model.add(TimeDistributedDense(self.hidden_size, self.vocab_size,
+
+        model.add(TimeDistributedDense(output_dim=self.vocab_size,
+                                       input_dim=self.hidden_size,
                                        W_regularizer=l2(self.l2reg)))
         model.add(Activation('time_distributed_softmax'))
 
-        model.compile(loss='categorical_crossentropy',
-                      optimizer=self.optimiser)
+        if self.optimiser == 'adam':
+            # allow user-defined hyper-parameters for ADAM because it is
+            # our preferred optimiser
+            lr = self.lr if self.lr is not None else 0.001
+            beta1 = self.beta1 if self.beta1 is not None else 0.9
+            beta2 = self.beta2 if self.beta2 is not None else 0.999
+            epsilon = self.epsilon if self.epsilon is not None else 1e-8
+            optimiser = Adam(lr=lr, beta1=beta1,
+                             beta2=beta2, epsilon=epsilon)
+            model.compile(loss='categorical_crossentropy',
+                          optimizer=optimiser)
+        else:
+            model.compile(loss='categorical_crossentropy',
+                          optimizer=self.optimiser)
 
         if self.weights is not None:
             logger.info("... with weights defined in %s", self.weights)
@@ -128,21 +147,6 @@ class OneLayerLSTM:
             model.add(text)
         model.add(LSTM(self.hidden_size, self.hidden_size,  # 1st GRU layer
                        return_sequences=True))
-
-        if self.optimiser == 'adam':
-            # allow user-defined hyper-parameters for ADAM because it is
-            # our preferred optimiser
-            lr = self.lr if self.lr is not None else 0.001
-            beta1 = self.beta1 if self.beta1 is not None else 0.9
-            beta2 = self.beta2 if self.beta2 is not None else 0.999
-            epsilon = self.epsilon if self.epsilon is not None else 1e-8
-            optimiser = Adam(lr=lr, beta1=beta1,
-                             beta2=beta2, epsilon=epsilon)
-            model.compile(loss='categorical_crossentropy',
-                          optimizer=optimiser)
-        else:
-            model.compile(loss='categorical_crossentropy',
-                          optimizer=self.optimiser)
 
         if self.weights is not None:
             logger.info("... with weights defined in %s", self.weights)

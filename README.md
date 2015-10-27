@@ -6,8 +6,8 @@ Dependencies
 * python 2.7.5
 * numpy 1.91
 * scipy 0.15
-* theano 0.7
-* Keras 0.11
+* [Theano 0.7](https://github.com/Theano/Theano/tree/rel-0.7)
+* [Keras 0.1.3](https://github.com/fchollet/keras/tree/0.1.3)
 * h5py 2.5.0
 * [dominate](https://github.com/Knio/dominate) to visualise the generated descriptions
 
