@@ -14,21 +14,21 @@ Dependencies
 Data
 ---
 
-Download the [IAPRTC-12 dataset](https://www.dropbox.com/sh/xvs44ofmzs88w2b/AABzv6YmyxwXXbiBfi5AqXFKa?dl=0) from Dropbix. Unzip into `iaprtc12_eng` and `iaprtc12_ger`, respectively.
+Download the [IAPRTC-12 dataset](https://www.dropbox.com/sh/xvs44ofmzs88w2b/AABzv6YmyxwXXbiBfi5AqXFKa?dl=0) from Dropbox. Unzip into `iaprtc12_eng` and `iaprtc12_ger`, respectively.
 
 Run `python util/makejson.py --path iaprtc12_eng` followed by `python util/jsonmat2h5.py --path iaprtc12_eng` to create the dataset.h5 file expected by GroundedTranslation. Repeat this process, replacing `eng` for `ger` to create the German dataset.h5 file.
 
 Training an English monolingual model
 ---
 
-Run `python train.py --dataset iaprtc12_eng --hidden_size=512` to train an English Vision-to-Language one-layer LSTM for `--epochs=50`, with `--optimiser=adam`, `--batch_size=100` instances, `--big_batch=10000` and `--l2reg=1e-8` weight regularisation. The hidden units have `--hidden_size=512` dimensions, with dropout parameters of `--dropin=0.5`, and an `--unk=3` threshold for pruning the word vocabulary. Training takes 500s/epoch on a Tesla K20X.
+Run `THEANO_FLAGS=floatX=float32,device=gpu0 python train.py --dataset iaprtc12_eng --hidden_size=256 --fixed_seed --run_string=fixed_seed-eng256mlm` to train an English Vision-to-Language one-layer LSTM for with `--optimiser=adam`, `--batch_size=100` instances, `--big_batch=10000` and `--l2reg=1e-8` weight regularisation. The hidden units have `--hidden_size=256` dimensions, with dropout parameters of `--dropin=0.5`, and an `--unk=3` threshold for pruning the word vocabulary. Training takes 500s/epoch on a Tesla K20X.
 
-This model should report a maximum BLEU4 of 17.38 on the val split, using a fixed seed of 1234.
+This model should report a maximum BLEU4 of 15.21 (PPLX 6.898) on the val split, using a fixed seed of 1234.
 
 Training a German monolingual model
 ---
 
-Run `python train.py --dataset iaprtc12_ger --hidden_size=256` to train a German Vision-to-Language one-layer LSTM for `--epochs=50`, with `--optimiser=adam`, `--batch_size=100` instances, `--big_batch=10000` and `--l2reg=1e-8` weight regularisation. The hidden units have `--hidden_size=256` dimensions, with dropout parameters of `--dropin=0.5`, and an `--unk=3` threshold for pruning the word vocabulary. Training takes 500s/epoch on a Tesla K20X.
+Run `THEANO_FLAGS=floatX=float32,device=gpu0 python train.py --dataset iaprtc12_ger --hidden_size=256 --run_string=fixed_seed-ger256mlm` to train a German Vision-to-Language one-layer LSTM for `--epochs=50`, with `--optimiser=adam`, `--batch_size=100` instances, `--big_batch=10000` and `--l2reg=1e-8` weight regularisation. The hidden units have `--hidden_size=256` dimensions, with dropout parameters of `--dropin=0.5`, and an `--unk=3` threshold for pruning the word vocabulary. Training takes 500s/epoch on a Tesla K20X.
 
 This model should report a maximum BLEU4 of 11.78 on the val split, using a fixed seed of 1234.
 
@@ -37,7 +37,7 @@ Training an English-German multilingual model
 
 Run `python extract_hidden_features.py --dataset=iaprtc12_eng --checkpoint=PATH_TO_BEST_MODEL_CHECKPOINT --hidden_size=512 --h5_writeable` to extract the final hidden state representations from a saved model state. The representations will be stored in `dataset/dataset.h5` in the `final_hidden_representations` field.
 
-Now run `python train.py --dataset iaprtc12_ger --hidden_size=256 --source_vectors=iaprtc12_eng` to train an English Vision-to-Language one-layer LSTM for `--epochs=50`, with `--optimiser=adam`, `--batch_size=100` instances, `--big_batch=10000` and `--l2reg=1e-8` weight regularisation. The hidden units have `--hidden_size=256` dimensions, with dropout parameters of `--dropin=0.5`, and an `--unk=3` threshold for pruning the word vocabulary. Training once again takes 500s/epoch on a Tesla K20X.
+Now run `THEANO_FLAGS=floatX=float32,device=gpu0 python train.py --dataset iaprtc12_ger --hidden_size=256 --source_vectors=iaprtc12_eng --run_string=fixed_seed-eng256mlm-ger256mlm` to train an English Vision-to-Language one-layer LSTM for `--epochs=50`, with `--optimiser=adam`, `--batch_size=100` instances, `--big_batch=10000` and `--l2reg=1e-8` weight regularisation. The hidden units have `--hidden_size=256` dimensions, with dropout parameters of `--dropin=0.5`, and an `--unk=3` threshold for pruning the word vocabulary. Training once again takes 500s/epoch on a Tesla K20X.
 
 This model should report a maximum BLEU4 of 13.05 on the val split, using a fixed seed of 1234. This represents a 1.28 BLEU point improvement over the German monolingual baseline.
 
