@@ -19,7 +19,7 @@ logger = logging.getLogger(__name__)
 IMG_FEATS = 4096
 
 
-class ExtractFinalHiddenActivations:
+class ExtractFinalHiddenStateActivations:
 
     def __init__(self, args):
         self.args = args
@@ -38,7 +38,16 @@ class ExtractFinalHiddenActivations:
             theano.config.optimizer = 'None'
             theano.config.exception_verbosity = 'high'
 
-    def get_hsn_activations(self):
+        self.source_type = "predicted" if self.args.use_predicted_tokens else "gold"
+        self.source_encoder = "mt_enc" if self.args.no_image else "vis_enc"
+        self.source_dim = self.args.hidden_size
+
+        self.h5_dataset_str = "%s-hidden_feats-%s-%d" % (self.source_type,
+                                                         self.source_encoder,
+                                                         self.source_dim)
+        logger.info("Serialising into %s" % self.h5_dataset_str)
+
+    def get_hidden_activations(self):
         '''
         In the model, we will merge the VGG image representation with
         the word embeddings. We need to feed the data as a list, in which
@@ -72,7 +81,7 @@ class ExtractFinalHiddenActivations:
         TODO: we should be able to serialise predicted final states instead of
         gold-standard final states for val and test data.
         '''
-        logger.info("Generating hidden state activations (hsn)\
+        logger.info("Extracting final hidden state activations (hsn)\
                     from this model for %s\n", split)
 
         if split == 'train':
@@ -119,7 +128,7 @@ class ExtractFinalHiddenActivations:
             # TODO: get keys and do serialise_to_h5 with keys.
             val_input, valY = self.data_generator.get_data_by_split(split,
                                       self.use_sourcelang, self.use_image)
-            logger.info("Generating hsn activations from this model for %s\n" % split)
+            logger.info("Extracting final hidden state activations from this model for %s\n" % split)
 
             hidden_states = []
             # We can extract the FGS from either oracle or predicted word
@@ -140,7 +149,7 @@ class ExtractFinalHiddenActivations:
                 for widx, warr in enumerate(valY[idx]):
                     w = np.argmax(warr)
                     if self.data_generator.index2word[w] == "<E>":
-                        logger.info("Sentence length %d", widx)
+                        logger.debug("Sentence length %d", widx)
                         final_hidden = h[widx]
                         hidden_states.append(final_hidden)
                         break
@@ -191,7 +200,7 @@ class ExtractFinalHiddenActivations:
         The output is clipped to the first EOS generated, if it exists.
 
         TODO: beam search
-        TODO: duplicated method with generate.py
+        TODO: duplicated method with generate.py and Callbacks.py
         """
         prefix = "val" if val else "test"
         logger.info("First generating %s descriptions", prefix)
@@ -239,20 +248,24 @@ class ExtractFinalHiddenActivations:
         logger.info("Serialising final hidden state features from %s to H5",
                     split)
         for idx, data_key in enumerate(data_keys):
-            try:
-                hsn_data = self.data_generator.dataset[split][data_key].create_dataset(
-                    fhf_str, (hsn_shape,), dtype='float32')
-            except RuntimeError:
-                # the dataset already exists, retrieve it into RAM and then overwrite it
-                del self.data_generator.dataset[split][data_key][fhf_str]
-                hsn_data = self.data_generator.dataset[split][data_key].create_dataset(
-                    fhf_str, (hsn_shape,), dtype='float32')
-            try:
-                hsn_data[:] = hidden_states[idx]
-            except IndexError:
-                raise IndexError("data_key %s of %s; index idx %d, len hidden %d" % (
-                    data_key, len(data_keys), idx, len(hidden_states)))
-                break
+            self.data_generator.set_source_features(split, data_key,
+                                                    self.h5_dataset_str,
+                                                    hidden_states[idx],
+                                                    hsn_shape)
+            #try:
+            #    hsn_data = self.data_generator.dataset[split][data_key].create_dataset(
+            #        fhf_str, (hsn_shape,), dtype='float32')
+            #except RuntimeError:
+            #    # the dataset already exists, retrieve it into RAM and then overwrite it
+            #    del self.data_generator.dataset[split][data_key][fhf_str]
+            #    hsn_data = self.data_generator.dataset[split][data_key].create_dataset(
+            #        fhf_str, (hsn_shape,), dtype='float32')
+            #try:
+            #    hsn_data[:] = hidden_states[idx]
+            #except IndexError:
+            #    raise IndexError("data_key %s of %s; index idx %d, len hidden %d" % (
+            #        data_key, len(data_keys), idx, len(hidden_states)))
+            #    break
 
     def serialise_to_h5(self, split, hsn_shape, hidden_states,
                         batch_start=None, batch_end=None):
@@ -264,7 +277,6 @@ class ExtractFinalHiddenActivations:
         idx = 0
         logger.info("Serialising final hidden state features from %s to H5",
                     split)
-        fhf_str = "final_hidden_features"
         if batch_start is not None:
             logger.info("Start at %d, end at %d", batch_start, batch_end)
             data_keys = ["%06d" % x for x in range(batch_start, batch_end)]
@@ -278,23 +290,26 @@ class ExtractFinalHiddenActivations:
                 data_keys = ["%06d" % x for x in range(len(hidden_states))]
             else:
                 data_keys = ["%06d" % x for x in range(len(hidden_states))]
-            logger.info(data_keys)
         for data_key in data_keys:
-            try:
-                hsn_data = self.data_generator.dataset[split][data_key].create_dataset(
-                    fhf_str, (hsn_shape,), dtype='float32')
-            except RuntimeError:
-                # the dataset already exists, retrieve it into RAM and then overwrite it
-                del self.data_generator.dataset[split][data_key][fhf_str]
-                hsn_data = self.data_generator.dataset[split][data_key].create_dataset(
-                    fhf_str, (hsn_shape,), dtype='float32')
-            try:
-                hsn_data[:] = hidden_states[idx]
-            except IndexError:
-                raise IndexError("data_key %s of %s; index idx %d, len hidden %d" % (
-                    data_key, len(data_keys),
-                                  idx, len(hidden_states)))
-                break
+            self.data_generator.set_source_features(split, data_key,
+                                                    self.h5_dataset_str,
+                                                    hidden_states[idx],
+                                                    hsn_shape)
+            #try:
+            #    hsn_data = self.data_generator.dataset[split][data_key].create_dataset(
+            #        fhf_str, (hsn_shape,), dtype='float32')
+            #except RuntimeError:
+            #    # the dataset already exists, retrieve it into RAM and then overwrite it
+            #    del self.data_generator.dataset[split][data_key][fhf_str]
+            #    hsn_data = self.data_generator.dataset[split][data_key].create_dataset(
+            #        fhf_str, (hsn_shape,), dtype='float32')
+            #try:
+            #    hsn_data[:] = hidden_states[idx]
+            #except IndexError:
+            #    raise IndexError("data_key %s of %s; index idx %d, len hidden %d" % (
+            #        data_key, len(data_keys),
+            #                      idx, len(hidden_states)))
+            #    break
             idx += 1
 
 if __name__ == "__main__":
@@ -359,5 +374,5 @@ if __name__ == "__main__":
                         activations over oracle inputs or from predicted\
                         inputs? Default = False ( == Oracle)")
 
-    w = ExtractFinalHiddenActivations(parser.parse_args())
-    w.get_hsn_activations()
+    w = ExtractFinalHiddenStateActivations(parser.parse_args())
+    w.get_hidden_activations()

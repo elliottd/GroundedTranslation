@@ -191,6 +191,12 @@ if __name__ == "__main__":
                         encoder/source language VisualWordLSTM model.\
                         (default: None.) Expects a final_hidden_representation\
                         vector for each image in the dataset")
+    parser.add_argument("--source_enc", type=str, default=None,
+                        help="Which type of source encoder features? Expects\
+                        either 'mt_enc' or 'vis_enc'. Required.")
+    parser.add_argument("--source_type", type=str, default=None,
+                        help="Source features over gold or predicted tokens?\
+                        Expects 'gold' or 'predicted'. Required")
 
     parser.add_argument("--dataset", default="", type=str, help="Path to the\
                         HDF5 dataset to use for training / val input\
@@ -249,6 +255,12 @@ if __name__ == "__main__":
                         reproding experiments. (default = False)")
 
     arguments = parser.parse_args()
+
+    if arguments.source_vectors is not None:
+        if arguments.source_type is None or arguments.source_enc is None:
+            parser.error("--source_type and --source_enc are required when\
+                        using --source_vectors")
+
     if arguments.fixed_seed:
         import numpy as np
         np.random.seed(1234)

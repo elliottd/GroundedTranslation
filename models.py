@@ -24,6 +24,10 @@ class OneLayerLSTM:
         self.l2reg = l2reg  # weight regularisation penalty
         self.hsn_size = hsn_size  # size of the source hidden vector
         self.weights = weights  # initialise with checkpointed weights?
+        self.beta1 = None
+        self.beta2 = None
+        self.epsilon = None
+        self.lr = None
         self.gru = gru  # gru recurrent layer? (false = lstm)
 
     def buildKerasModel(self, use_sourcelang=False, use_image=True):
@@ -47,10 +51,10 @@ class OneLayerLSTM:
         text.add(Dropout(self.dropin))
 
         if use_sourcelang:
-            logger.info("... hsn: adding source language vector as input features")
+            logger.info("... hsn: adding source features (%d dim)", self.hsn_size)
             source_hidden = Sequential()
-            source_hidden.add(TimeDistributedDense(ouptut_dim=self.hsn_size,
-                                                   input_size=self.hidden_size,
+            source_hidden.add(TimeDistributedDense(output_dim=self.hidden_size,
+                                                   input_dim=self.hsn_size,
                                                    W_regularizer=l2(self.l2reg)))
             source_hidden.add(Dropout(self.dropin))
 
@@ -90,20 +94,20 @@ class OneLayerLSTM:
                                        W_regularizer=l2(self.l2reg)))
         model.add(Activation('time_distributed_softmax'))
 
-        if self.optimiser == 'adam':
-            # allow user-defined hyper-parameters for ADAM because it is
-            # our preferred optimiser
-            lr = self.lr if self.lr is not None else 0.001
-            beta1 = self.beta1 if self.beta1 is not None else 0.9
-            beta2 = self.beta2 if self.beta2 is not None else 0.999
-            epsilon = self.epsilon if self.epsilon is not None else 1e-8
-            optimiser = Adam(lr=lr, beta1=beta1,
-                             beta2=beta2, epsilon=epsilon)
-            model.compile(loss='categorical_crossentropy',
-                          optimizer=optimiser)
-        else:
-            model.compile(loss='categorical_crossentropy',
-                          optimizer=self.optimiser)
+#        if self.optimiser == 'adam':
+#            # allow user-defined hyper-parameters for ADAM because it is
+#            # our preferred optimiser
+#            lr = self.lr if self.lr is not None else 0.001
+#            beta1 = self.beta1 if self.beta1 is not None else 0.9
+#            beta2 = self.beta2 if self.beta2 is not None else 0.999
+#            epsilon = self.epsilon if self.epsilon is not None else 1e-8
+#            optimiser = Adam(lr=lr, beta1=beta1,
+#                             beta2=beta2, epsilon=epsilon)
+#            model.compile(loss='categorical_crossentropy',
+#                          optimizer=optimiser)
+#        else:
+        model.compile(loss='categorical_crossentropy',
+                      optimizer=self.optimiser)
 
         if self.weights is not None:
             logger.info("... with weights defined in %s", self.weights)
@@ -161,6 +165,8 @@ class OneLayerLSTM:
                 model.layers[k].set_weights(weights)
             f.close()
 
+        model.compile(loss='categorical_crossentropy',
+                      optimizer=self.optimiser)
         return model
 
     def buildMergeActivations(self, use_image=True, use_sourcelang=False):

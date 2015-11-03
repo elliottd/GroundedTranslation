@@ -71,12 +71,12 @@ class VisualWordDataGenerator(object):
         # self.datasets holds 1+ datasets, where additional datasets will
         # be used for supertraining the model
         self.datasets = []
-        openmode = "r+" if self.args_dict.h5_writeable else "r"
+        self.openmode = "r+" if self.args_dict.h5_writeable else "r"
         if not input_dataset:
             logger.warn("No dataset given, using flickr8k")
-            self.dataset = h5py.File("flickr8k/dataset.h5", openmode)
+            self.dataset = h5py.File("flickr8k/dataset.h5", self.openmode)
         else:
-            self.dataset = h5py.File("%s/dataset.h5" % input_dataset, openmode)
+            self.dataset = h5py.File("%s/dataset.h5" % input_dataset, self.openmode)
         logger.info("Train/val dataset: %s", input_dataset)
 
         if args_dict.supertrain_datasets is not None:
@@ -91,9 +91,16 @@ class VisualWordDataGenerator(object):
             self.source_dataset = h5py.File("%s/dataset.h5"
                                             % self.args_dict.source_vectors,
                                             "r")
-            self.hsn_size = len(self.source_dataset['val']['000000']
-                                ['final_hidden_features'])
-            logger.info("Available sourcelang/HSN input: size %d", self.hsn_size)
+            self.source_encoder = args_dict.source_enc
+            self.source_type = args_dict.source_type
+            self.source_dim = args_dict.hidden_size
+            self.h5_dataset_str = "%s-hidden_feats-%s-%d" % (self.source_type,
+                                                      self.source_encoder,
+                                                      self.source_dim)
+            self.hsn_size = len(self.source_dataset['train']['000000']
+                                [self.h5_dataset_str])
+            logger.info("Reading source vectors from %s with %d dims",
+                        self.h5_dataset_str, self.hsn_size)
 
         # These variables are filled by extract_vocabulary
         self.word2index = dict()
@@ -207,7 +214,8 @@ class VisualWordDataGenerator(object):
                             description.split())
                         if use_sourcelang:
                             arrays[1][batch_index, 0, :] =\
-                                self.get_hsn_features('train', data_key)
+                                self.get_source_features('train', data_key)
+                                #self.get_hsn_features('train', data_key)
                         if use_image:
                             # img_idx is 1 or 2, depending on use_sourcelang
                             arrays[img_idx][batch_index, 0, :] =\
@@ -344,7 +352,8 @@ class VisualWordDataGenerator(object):
             for d in descriptions[0:1]:
                 arrays[0][d_idx, :, :] = self.format_sequence(d.split())
                 if use_sourcelang:  # XXX ATTENTION this was originally self.hsn
-                    arrays[1][d_idx, 0, :] = self.get_hsn_features(split, data_key)
+                    #arrays[1][d_idx, 0, :] = self.get_hsn_features(split, data_key)
+                    arrays[1][d_idx, 0, :] = self.get_source_features(split, data_key)
                 if use_image:
                     # img_idx can be 1 or 2, depending on use_sourcelang
                     arrays[img_idx][d_idx, 0, :] = self.get_image_features(
@@ -417,7 +426,8 @@ class VisualWordDataGenerator(object):
             for description in ds:
                 arrays[0][d_idx, :, :] = self.format_sequence(description.split())
                 if use_sourcelang:  # XXX ATTENTION this was originally self.hsn
-                    arrays[1][d_idx, 0, :] = self.get_hsn_features(split, data_key)
+                    #arrays[1][d_idx, 0, :] = self.get_hsn_features(split, data_key)
+                    arrays[1][d_idx, 0, :] = self.get_source_features(split, data_key)
                 if use_image:
                     # img_idx can be 1 or 2, depending on use_sourcelang
                     arrays[img_idx][d_idx, 0, :] = self.get_image_features(
@@ -465,6 +475,49 @@ class VisualWordDataGenerator(object):
         try:
             return floatX(self.source_dataset[split][data_key]
                           ['final_hidden_features'])
+        except KeyError:
+            # this image -- description pair doesn't have a source-language
+            # vector. Raise a KeyError so the requester can deal with the
+            # missing data.
+            logger.warning("Skipping '%s' because it doesn't have a source vector", data_key)
+            raise KeyError
+
+    def set_source_features(self, split, data_key, dataset_key, feats, dims):
+        '''
+        Set the source feature vector stored in the dataset_key group,
+        creating the group if necessary, or erasing the current value if
+        necessary.
+        '''
+
+        if self.openmode != "r+":
+            # forcefully quit when trying to write to a read-only file
+            raise RuntimeError("Dataset is read-only, try again with --h5_writable")
+
+        try:
+            source_data = self.dataset[split][data_key].create_dataset(
+                                  dataset_key, (dims,), dtype='float32')
+        except RuntimeError:
+            # the dataset already exists, erase it and create an empty space
+            del self.dataset[split][data_key][dataset_key]
+            source_data = self.dataset[split][data_key].create_dataset(
+                                  dataset_key, (dims,), dtype='float32')
+
+        source_data[:] = feats
+
+    def get_source_features(self, split, data_key):
+        '''
+        Return the source feature vector from self.source_dataset.
+
+        Relies on self.source_encoder,
+                  self.source_dim,
+                  self.source_type
+        '''
+
+        h5_dataset_str = "%s-hidden_feats-%s-%d" % (self.source_type,
+                                                    self.source_encoder,
+                                                    self.source_dim)
+        try:
+            return self.source_dataset[split][data_key][h5_dataset_str]
         except KeyError:
             # this image -- description pair doesn't have a source-language
             # vector. Raise a KeyError so the requester can deal with the
