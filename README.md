@@ -21,9 +21,9 @@ Run `python util/makejson.py --path iaprtc12_eng` followed by `python util/jsonm
 Training an English monolingual model
 ---
 
-Run `THEANO_FLAGS=floatX=float32,device=gpu0 python train.py --dataset iaprtc12_eng --hidden_size=512` to train an English Vision-to-Language one-layer LSTM for `--epochs=50`, with `--optimiser=adam`, `--batch_size=100` instances, `--big_batch=10000` and `--l2reg=1e-8` weight regularisation. The hidden units have `--hidden_size=512` dimensions, with dropout parameters of `--dropin=0.5`, and an `--unk=3` threshold for pruning the word vocabulary. Training takes 500s/epoch on a Tesla K20X.
+Run `THEANO_FLAGS=floatX=float32,device=gpu0 python train.py --dataset iaprtc12_eng --hidden_size=256 --fixed_seed` to train an English Vision-to-Language one-layer LSTM for with `--optimiser=adam`, `--batch_size=100` instances, `--big_batch=10000` and `--l2reg=1e-8` weight regularisation. The hidden units have `--hidden_size=256` dimensions, with dropout parameters of `--dropin=0.5`, and an `--unk=3` threshold for pruning the word vocabulary. Training takes 500s/epoch on a Tesla K20X.
 
-This model should report a maximum BLEU4 of 17.38 on the val split, using a fixed seed of 1234.
+This model should report a maximum BLEU4 of 15.21 (PPLX 6.898) on the val split, using a fixed seed of 1234.
 
 Training a German monolingual model
 ---
