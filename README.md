@@ -28,16 +28,23 @@ This model should report a maximum BLEU4 of 15.21 (PPLX 6.898) on the val split,
 Training a German monolingual model
 ---
 
-Run `THEANO_FLAGS=floatX=float32,device=gpu0 python train.py --dataset iaprtc12_ger --hidden_size=256 --run_string=fixed_seed-ger256mlm` to train a German Vision-to-Language one-layer LSTM for `--epochs=50`, with `--optimiser=adam`, `--batch_size=100` instances, `--big_batch=10000` and `--l2reg=1e-8` weight regularisation. The hidden units have `--hidden_size=256` dimensions, with dropout parameters of `--dropin=0.5`, and an `--unk=3` threshold for pruning the word vocabulary. Training takes 500s/epoch on a Tesla K20X.
+Run `THEANO_FLAGS=floatX=float32,device=gpu0 python train.py --dataset iaprtc12_ger --hidden_size=256  --fixed_seed --run_string=fixed_seed-ger256mlm` to train a German Vision-to-Language one-layer LSTM for with `--optimiser=adam`, `--batch_size=100` instances, `--big_batch=10000` and `--l2reg=1e-8` weight regularisation. The hidden units have `--hidden_size=256` dimensions, with dropout parameters of `--dropin=0.5`, and an `--unk=3` threshold for pruning the word vocabulary. Training takes 500s/epoch on a Tesla K20X.
 
 This model should report a maximum BLEU4 of 11.64 (PPLX 9.376) on the val split, using a fixed seed of 1234.
+
+Extracting Hidden Features from a Trained Model
+---
+
+Run `python extract_hidden_features.py --dataset=iaprtc12_eng --checkpoint=PATH_TO_BEST_MODEL_CHECKPOINT --hidden_size=256 --h5_writeable` to extract the final hidden state representations from a saved model state. The representations will be stored in `dataset/dataset.h5` in the `gold-hidden_feats-vis_enc-256` field. `--use_predicted_tokens`, `hidden_size`, and `--no_image` affect the label of the storage field. Specifically, `--hidden_size` can only be varied with an appropriately trained model. `--no_image` can only be varied with a model trained over only word inputs. `--use_predicted_tokens` only makes sense with an MLM.
+
+* `--hidden_size=512` -> `gold-hidden_feats-vis_enc-512` (multimodal hidden features with 512 dims)
+* `--use_predicted_tokens` -> `predicted-hidden_feats-vis_enc-256` (hidden features from *predicted* descriptions)
+* `--no_image` -> `gold-hidden_feats-mt_enc-256` (LM-only hidden features)
 
 Training an English-German multilingual model
 ---
 
-Run `python extract_hidden_features.py --dataset=iaprtc12_eng --checkpoint=PATH_TO_BEST_MODEL_CHECKPOINT --hidden_size=512 --h5_writeable` to extract the final hidden state representations from a saved model state. The representations will be stored in `dataset/dataset.h5` in the `final_hidden_representations` field.
-
-Now run `THEANO_FLAGS=floatX=float32,device=gpu0 python train.py --dataset iaprtc12_ger --hidden_size=256 --source_vectors=iaprtc12_eng --run_string=fixed_seed-eng256mlm-ger256mlm` to train an English Vision-to-Language one-layer LSTM for `--epochs=50`, with `--optimiser=adam`, `--batch_size=100` instances, `--big_batch=10000` and `--l2reg=1e-8` weight regularisation. The hidden units have `--hidden_size=256` dimensions, with dropout parameters of `--dropin=0.5`, and an `--unk=3` threshold for pruning the word vocabulary. Training once again takes 500s/epoch on a Tesla K20X.
+Now run `THEANO_FLAGS=floatX=float32,device=gpu0 python train.py --dataset iaprtc12_ger --hidden_size=256  --fixed_seed --source_vectors=iaprtc12_eng --source_type=gold --source_enc=vis_enc --run_string=fixed_seed-eng256mlm-ger256mlm` to train an English Vision-to-Language one-layer LSTM for with `--optimiser=adam`, `--batch_size=100` instances, `--big_batch=10000` and `--l2reg=1e-8` weight regularisation. The hidden units have `--hidden_size=256` dimensions, with dropout parameters of `--dropin=0.5`, and an `--unk=3` threshold for pruning the word vocabulary. Training once again takes 500s/epoch on a Tesla K20X.
 
 This model should report a maximum BLEU4 of 14.06 (PPLX 8.827) on the val split, using a fixed seed of 1234. This represents a 2.42 BLEU point improvement over the German monolingual baseline.
 
