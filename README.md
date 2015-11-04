@@ -30,7 +30,7 @@ Training a German monolingual model
 
 Run `THEANO_FLAGS=floatX=float32,device=gpu0 python train.py --dataset iaprtc12_ger --hidden_size=256 --run_string=fixed_seed-ger256mlm` to train a German Vision-to-Language one-layer LSTM for `--epochs=50`, with `--optimiser=adam`, `--batch_size=100` instances, `--big_batch=10000` and `--l2reg=1e-8` weight regularisation. The hidden units have `--hidden_size=256` dimensions, with dropout parameters of `--dropin=0.5`, and an `--unk=3` threshold for pruning the word vocabulary. Training takes 500s/epoch on a Tesla K20X.
 
-This model should report a maximum BLEU4 of 11.78 on the val split, using a fixed seed of 1234.
+This model should report a maximum BLEU4 of 11.64 (PPLX 9.376) on the val split, using a fixed seed of 1234.
 
 Training an English-German multilingual model
 ---
@@ -39,7 +39,7 @@ Run `python extract_hidden_features.py --dataset=iaprtc12_eng --checkpoint=PATH_
 
 Now run `THEANO_FLAGS=floatX=float32,device=gpu0 python train.py --dataset iaprtc12_ger --hidden_size=256 --source_vectors=iaprtc12_eng --run_string=fixed_seed-eng256mlm-ger256mlm` to train an English Vision-to-Language one-layer LSTM for `--epochs=50`, with `--optimiser=adam`, `--batch_size=100` instances, `--big_batch=10000` and `--l2reg=1e-8` weight regularisation. The hidden units have `--hidden_size=256` dimensions, with dropout parameters of `--dropin=0.5`, and an `--unk=3` threshold for pruning the word vocabulary. Training once again takes 500s/epoch on a Tesla K20X.
 
-This model should report a maximum BLEU4 of 13.05 on the val split, using a fixed seed of 1234. This represents a 1.28 BLEU point improvement over the German monolingual baseline.
+This model should report a maximum BLEU4 of 14.06 (PPLX 8.827) on the val split, using a fixed seed of 1234. This represents a 2.42 BLEU point improvement over the German monolingual baseline.
 
 References
 ---
@@ -47,7 +47,5 @@ References
 These papers formed a basis for inspiring this project.
 
 [Show and Tell: A Neural Image Caption Generator. Oriol Vinyals, Alexander Toshev, Samy Bengio, Dumitru Erhan. CVPR '15](http://www.cv-foundation.org/openaccess/content_cvpr_2015/papers/Vinyals_Show_and_Tell_2015_CVPR_paper.pdf)
-
-[Deep Visual-Semantic Alignments for Generating Image Descriptions. Andrej Karpathy, Li Fei-Fei. CVPR '15](http://www.cv-foundation.org/openaccess/content_cvpr_2015/papers/Karpathy_Deep_Visual-Semantic_Alignments_2015_CVPR_paper.pdf)
 
 [Sequence to Sequence Learning with Neural Networks. Ilya Sutskever, Oriol Vinyals, Quoc V. Le. NIPS '14.](http://papers.nips.cc/paper/5346-sequence-to-sequence-learning-with-neural-networks.pdf)
