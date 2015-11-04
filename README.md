@@ -14,7 +14,7 @@ Dependencies
 Data
 ---
 
-Download the [IAPRTC-12 dataset](https://www.dropbox.com/sh/xvs44ofmzs88w2b/AABzv6YmyxwXXbiBfi5AqXFKa?dl=0) from Dropbox. Unzip into `iaprtc12_eng` and `iaprtc12_ger`, respectively.
+Download a pre-processed version of the IAPRTC-12 dataset for [English](https://www.dropbox.com/s/lmpjbbozuaebisj/eng.tar.gz) and [German](https://www.dropbox.com/s/u6d9tt88ncst5da/ger.tar.gz) from Dropbox. Unzip into `iaprtc12_eng` and `iaprtc12_ger`, respectively.
 
 Run `python util/makejson.py --path iaprtc12_eng` followed by `python util/jsonmat2h5.py --path iaprtc12_eng` to create the dataset.h5 file expected by GroundedTranslation. Repeat this process, replacing `eng` for `ger` to create the German dataset.h5 file.
 
