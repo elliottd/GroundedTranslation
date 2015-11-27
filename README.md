@@ -3,6 +3,7 @@
 Dependencies
 ---
 
+* CUDA 6.5.14
 * python 2.7.5
 * numpy 1.91
 * scipy 0.15
