@@ -3,6 +3,7 @@
 Dependencies
 ---
 
+* CUDA 6.5.14
 * python 2.7.5
 * numpy 1.91
 * scipy 0.15
@@ -35,7 +36,7 @@ This model should report a maximum BLEU4 of 11.64 (PPLX 9.376) on the val split,
 Extracting Hidden Features from a Trained Model
 ---
 
-Run `python extract_hidden_features.py --dataset=iaprtc12_eng --checkpoint=PATH_TO_BEST_MODEL_CHECKPOINT --hidden_size=256 --h5_writeable` to extract the final hidden state representations from a saved model state. The representations will be stored in `dataset/dataset.h5` in the `gold-hidden_feats-vis_enc-256` field. `--use_predicted_tokens`, `hidden_size`, and `--no_image` affect the label of the storage field. Specifically, `--hidden_size` can only be varied with an appropriately trained model. `--no_image` can only be varied with a model trained over only word inputs. `--use_predicted_tokens` only makes sense with an MLM.
+Run `python extract_hidden_features.py --dataset=iaprtc12_eng --model_checkpoints=PATH_TO_MODEL_CHECKPOINTS --hidden_size=256 --h5_writeable` to extract the final hidden state representations from a saved model state. The representations will be stored in `dataset/dataset.h5` in the `gold-hidden_feats-vis_enc-256` field. `--use_predicted_tokens`, `--hidden_size`, and `--no_image` affect the label of the storage field. Specifically, `--hidden_size` can only be varied with an appropriately trained model. `--no_image` can only be varied with a model trained over only word inputs. `--use_predicted_tokens` only makes sense with an MLM.
 
 * `--hidden_size=512` -> `gold-hidden_feats-vis_enc-512` (multimodal hidden features with 512 dims)
 * `--use_predicted_tokens` -> `predicted-hidden_feats-vis_enc-256` (hidden features from *predicted* descriptions)
