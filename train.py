@@ -220,7 +220,7 @@ if __name__ == "__main__":
                         will be terminated if validation BLEU score does not\
                         increase for this number of epochs")
     parser.add_argument("--batch_size", default=100, type=int)
-    parser.add_argument("--hidden_size", default=512, type=int)
+    parser.add_argument("--hidden_size", default=256, type=int)
     parser.add_argument("--dropin", default=0.5, type=float,
                         help="Prob. of dropping embedding units. Default=0.5")
     parser.add_argument("--gru", action="store_true", help="Use GRU instead\

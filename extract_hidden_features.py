@@ -7,6 +7,7 @@ import argparse
 import logging
 import itertools
 from copy import deepcopy
+import os
 
 from data_generator import VisualWordDataGenerator
 import models
@@ -57,6 +58,7 @@ class ExtractFinalHiddenStateActivations:
         self.data_generator = VisualWordDataGenerator(self.args,
                                                       self.args.dataset,
                                                       self.args.hidden_size)
+        self.args.checkpoint = self.find_best_checkpoint()
         self.data_generator.set_vocabulary(self.args.checkpoint)
         self.vocab_len = len(self.data_generator.index2word)
 
@@ -67,10 +69,11 @@ class ExtractFinalHiddenStateActivations:
                                 gru=self.args.gru)
 
         self.fhs = m.buildHSNActivations(self.use_image)
-        if self.args.use_predicted_tokens:
+        if self.args.use_predicted_tokens and self.args.no_image == False:
             self.full_model = m.buildKerasModel(use_image=self.use_image)
 
-        self.generate_activations('train')
+        if self.args.sentences_to_h5 is False:
+            self.generate_activations('train')
         self.generate_activations('val')
         self.generate_activations('test')
 
@@ -81,8 +84,7 @@ class ExtractFinalHiddenStateActivations:
         TODO: we should be able to serialise predicted final states instead of
         gold-standard final states for val and test data.
         '''
-        logger.info("Extracting final hidden state activations (hsn)\
-                    from this model for %s\n", split)
+        logger.info("%s: extracting final hidden state activations from this model", split)
 
         if split == 'train':
             """ WARNING: This collects the *entirety of the training data* in
@@ -126,27 +128,26 @@ class ExtractFinalHiddenStateActivations:
 
         elif split == 'val' or split == "test":
             # TODO: get keys and do serialise_to_h5 with keys.
-            val_input, valY = self.data_generator.get_data_by_split(split,
+            inputs, Ys = self.data_generator.get_data_by_split(split,
                                       self.use_sourcelang, self.use_image)
-            logger.info("Extracting final hidden state activations from this model for %s\n" % split)
-
             hidden_states = []
             # We can extract the FGS from either oracle or predicted word
             # sequences for val  / test data .
-            if self.args.use_predicted_tokens:
-                predicted_words = self.generate_sentences(split == split)
-                val_input, valY = self.make_generation_arrays(split,
+            if self.args.use_predicted_tokens is True and self.args.no_image is False:
+                predicted_words = self.generate_sentences(split)
+                self.sentences_to_h5(split, predicted_words)
+                inputs, Ys = self.make_generation_arrays(split,
                                          self.args.generate_from_N_words,
                                          predicted_tokens=predicted_words)
 
-            hsn = self.fhs.predict(val_input,
+            hsn = self.fhs.predict(inputs,
                                    batch_size=self.args.batch_size,
                                    verbose=1)
 
             for idx, h in enumerate(hsn):
                 # get final_hidden index on a sentence-by-sentence
                 # basis by searching for the first <E> in each trainY
-                for widx, warr in enumerate(valY[idx]):
+                for widx, warr in enumerate(Ys[idx]):
                     w = np.argmax(warr)
                     if self.data_generator.index2word[w] == "<E>":
                         logger.debug("Sentence length %d", widx)
@@ -167,7 +168,7 @@ class ExtractFinalHiddenStateActivations:
                                        self.use_sourcelang, self.use_image)
 
         if predicted_tokens is not None:
-            logger.info("Initialising with model-predicted tokens")
+            logger.info("Initialising generation arrays with predicted tokens")
             gen_input_data = deepcopy(input_data)
             tokens = gen_input_data[0]
             tokens[:, fixed_words, :] = 0  # reset the inputs
@@ -188,7 +189,7 @@ class ExtractFinalHiddenStateActivations:
             gen_input_data[0][:, fixed_words:, :] = 0
             return gen_input_data
 
-    def generate_sentences(self, val=True):
+    def generate_sentences(self, split):
         """
         Generates descriptions of images for --generation_timesteps
         iterations through the LSTM. Each input description is clipped to
@@ -202,14 +203,13 @@ class ExtractFinalHiddenStateActivations:
         TODO: beam search
         TODO: duplicated method with generate.py and Callbacks.py
         """
-        prefix = "val" if val else "test"
-        logger.info("First generating %s descriptions", prefix)
+        logger.info("%s: generating descriptions", split)
 
         start_gen = self.args.generate_from_N_words  # Default 0
         start_gen = start_gen + 1  # include BOS
 
         # prepare the datastructures for generation (no batching over val)
-        arrays = self.make_generation_arrays(prefix, start_gen)
+        arrays = self.make_generation_arrays(split, start_gen)
         N_sents = arrays[0].shape[0]
 
         complete_sentences = [[] for _ in range(N_sents)]
@@ -267,6 +267,26 @@ class ExtractFinalHiddenStateActivations:
             #        data_key, len(data_keys), idx, len(hidden_states)))
             #    break
 
+    def sentences_to_h5(self, split, sentences):
+        '''
+        Save the predicted sentences into the h5 dataset object.
+        This is useful for subsequently (i.e. in a different program)
+        extracting LM-only final hidden states from predicted sentences.
+        Specifically, this can be compared to generating LM-only hidden
+        states over gold-standard tokens.
+        '''
+        idx = 0
+        logger.info("Serialising sentences from %s to H5", split)
+        data_keys = self.data_generator.dataset[split]
+        if split == 'val' and self.args.small_val:
+            data_keys = ["%06d" % x for x in range(len(sentences))]
+        else:
+            data_keys = ["%06d" % x for x in range(len(sentences))]
+        for data_key in data_keys:
+            self.data_generator.set_predicted_description(split, data_key,
+                                                          sentences[idx][1:])
+            idx += 1
+
     def serialise_to_h5(self, split, hsn_shape, hidden_states,
                         batch_start=None, batch_end=None):
         """ Serialise the hidden representations from generate_activations
@@ -312,6 +332,32 @@ class ExtractFinalHiddenStateActivations:
             #    break
             idx += 1
 
+    def find_best_checkpoint(self):
+        '''
+        Read the summary file from the directory and scrape out the run ID of
+        the highest BLEU scoring checkpoint. Then do an ls-stlye function in
+        the directory and return the exact path to the best model.
+
+        Assumes only one matching prefix in the model checkpoints directory.
+        '''
+
+        summary_data = open("%s/summary" % self.args.model_checkpoints).readlines()
+        summary_data = [x.replace("\n", "") for x in summary_data]
+        best_id = None
+        target = "Best PPLX" if self.args.best_pplx else "Best BLEU"
+        for line in summary_data:
+            if line.startswith(target):
+                best_id = "%03d" % (int(line.split(":")[1].split("|")[0]))
+
+        checkpoint = None
+        if best_id is not None:
+            checkpoints = os.listdir(self.args.model_checkpoints)
+            for c in checkpoints:
+                if c.startswith(best_id):
+                    checkpoint = c
+                    break
+        return "%s/%s" % (self.args.model_checkpoints, checkpoint)
+
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="""
                                      Serialise final RNN hidden state vector
@@ -341,10 +387,13 @@ if __name__ == "__main__":
 
     parser.add_argument("--test", action="store_true",
                         help="Generate for the test images? Default=False")
-    parser.add_argument("--generation_timesteps", default=10, type=int,
+    parser.add_argument("--generation_timesteps", default=30, type=int,
                         help="Attempt to generate how many words?")
-    parser.add_argument("--checkpoint", type=str, required=True,
+    parser.add_argument("--model_checkpoints", type=str, required=True,
                         help="Path to the checkpointed parameters")
+    parser.add_argument("--best_pplx", action="store_true",
+                        help="Is the best model defined by lowest PPLX?\
+                        Default = False, which implies highest BLEU")
     parser.add_argument("--dataset", type=str,
                         help="Dataset on which to evaluate")
     parser.add_argument("--big_batch_size", type=int, default=1000)
@@ -373,6 +422,11 @@ if __name__ == "__main__":
                         help="Generate final hidden state\
                         activations over oracle inputs or from predicted\
                         inputs? Default = False ( == Oracle)")
+    parser.add_argument("--sentences_to_h5", action="store_true", 
+                        help="Do you want to serialise the predicted sentences\
+                        back into the H5 file? This is useful when you want to\
+                        train an LM-LM model with automatically generated\
+                        source LM sentences. (Effectively an MLM-LM-LM).")
 
     w = ExtractFinalHiddenStateActivations(parser.parse_args())
     w.get_hidden_activations()

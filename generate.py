@@ -172,6 +172,7 @@ class GroundedTranslationGenerator:
                 if c.startswith(best_id):
                     checkpoint = c
                     break
+        logger.info("Best checkpoint: %s/%s" % (self.args.model_checkpoints, checkpoint))
         return "%s/%s" % (self.args.model_checkpoints, checkpoint)
 
     def yield_chunks(self, len_split_indices, batch_size):
@@ -333,6 +334,12 @@ if __name__ == "__main__":
                         help="Generate final hidden state\
                         activations over oracle inputs or from predicted\
                         inputs? Default = False ( == Oracle)")
+    parser.add_argument("--source_enc", type=str, default=None,
+                        help="Which type of source encoder features? Expects\
+                        either 'mt_enc' or 'vis_enc'. Required.")
+    parser.add_argument("--source_type", type=str, default=None,
+                        help="Source features over gold or predicted tokens?\
+                        Expects 'gold' or 'predicted'. Required")
 
     w = GroundedTranslationGenerator(parser.parse_args())
     w.generationModel()

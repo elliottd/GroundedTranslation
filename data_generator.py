@@ -121,6 +121,13 @@ class VisualWordDataGenerator(object):
         self._cached_val_targets = None
         self._cached_references = None
 
+        if self.args_dict.use_predicted_tokens and self.args_dict.no_image:
+          logger.info("Input predicted descriptions")
+          self.ds_type = 'predicted_description'
+        else:
+          logger.info("Input gold descriptions")
+          self.ds_type = 'descriptions'
+
     def get_vocab_size(self):
         """Return training (currently also +val) vocabulary size."""
         return len(self.word2index)
@@ -284,9 +291,9 @@ class VisualWordDataGenerator(object):
     def get_refs_by_split_as_list(self, split):
         """ Replaces extract_references in Callbacks."""
 
-        if self._cached_references is not None and split == "val":
-            logger.info("Retrieving cached val_references")
-            return self._cached_references
+        #if self._cached_references is not None and split == "val":
+        #    logger.info("Retrieving cached val_references")
+        #    return self._cached_references
 
         # Doesn't work for train because of size/batching, also not needed.
         assert split in ['test', 'val'], "Not possible for split %s" % split
@@ -300,8 +307,8 @@ class VisualWordDataGenerator(object):
                 if len(references) >= SMALL_VAL:
                     break
 
-        if split == "val":
-            self._cached_references = references
+        #if split == "val":
+        #    self._cached_references = references
         return references
 
     def get_generation_data_by_split(self, split, use_sourcelang=False,
@@ -422,7 +429,7 @@ class VisualWordDataGenerator(object):
 
         d_idx = 0  # description index
         for data_key in self.dataset[split]:
-            ds = self.dataset[split][data_key]['descriptions']
+            ds = self.dataset[split][data_key][self.ds_type]
             for description in ds:
                 arrays[0][d_idx, :, :] = self.format_sequence(description.split())
                 if use_sourcelang:  # XXX ATTENTION this was originally self.hsn
@@ -481,6 +488,28 @@ class VisualWordDataGenerator(object):
             # missing data.
             logger.warning("Skipping '%s' because it doesn't have a source vector", data_key)
             raise KeyError
+
+    def set_predicted_description(self, split, data_key, sentence):
+        '''
+        Set the predicted sentence tokens in the data_key group,
+        creating the group if necessary, or erasing the current value if
+        necessary.
+        '''
+
+        if self.openmode != "r+":
+            # forcefully quit when trying to write to a read-only file
+            raise RuntimeError("Dataset is read-only, try again with --h5_writable")
+
+        dataset_key = 'predicted_description'
+
+        try:
+            predicted_text = self.dataset[split][data_key].create_dataset(dataset_key, (1,), dtype=h5py.special_dtype(vlen=unicode))
+        except RuntimeError:
+            # the dataset already exists, erase it and create an empty space
+            del self.dataset[split][data_key][dataset_key]
+            predicted_text = self.dataset[split][data_key].create_dataset(dataset_key, (1,), dtype=h5py.special_dtype(vlen=unicode))
+
+        predicted_text[0] = " ".join([x for x in sentence])
 
     def set_source_features(self, split, data_key, dataset_key, feats, dims):
         '''
@@ -561,10 +590,11 @@ class VisualWordDataGenerator(object):
         a dataset and updates the number of sentences in a split.
         TODO: can we get split_sizes from H5 dataset indices directly?
         '''
+        local_ds_type = "descriptions" if split == 'train' else self.ds_type
         longest_sentence = 0
         for dataset in self.datasets:
             for data_key in dataset[split]:
-                for description in dataset[split][data_key]['descriptions'][0:self.args_dict.num_sents]:
+                for description in dataset[split][data_key][local_ds_type][0:self.args_dict.num_sents]:
                     d = description.split()
                     if len(d) > longest_sentence:
                         longest_sentence = len(d)
