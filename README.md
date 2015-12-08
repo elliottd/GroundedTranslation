@@ -31,7 +31,7 @@ Training a German monolingual model
 
 Run `THEANO_FLAGS=floatX=float32,device=gpu0 python train.py --dataset iaprtc12_ger --hidden_size=256  --fixed_seed --run_string=fixed_seed-ger256mlm` to train a German Vision-to-Language one-layer LSTM for with `--optimiser=adam`, `--batch_size=100` instances, `--big_batch=10000` and `--l2reg=1e-8` weight regularisation. The hidden units have `--hidden_size=256` dimensions, with dropout parameters of `--dropin=0.5`, and an `--unk=3` threshold for pruning the word vocabulary. Training takes 500s/epoch on a Tesla K20X.
 
-This model should report a maximum BLEU4 of 11.64 (PPLX 9.376) on the val split, using a fixed seed of 1234.
+This model should report a maximum BLEU4 of 11.91 (PPLX 9.347) on the val split, using a fixed seed of 1234.
 
 Extracting Hidden Features from a Trained Model
 ---
