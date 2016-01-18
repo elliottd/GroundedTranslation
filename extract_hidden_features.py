@@ -13,7 +13,7 @@ from data_generator import VisualWordDataGenerator
 import models
 
 # Set up logger
-logging.basicConfig(level=logging.INFO)
+logging.basicConfig(level=logging.INFO, stream=sys.stdout)
 logger = logging.getLogger(__name__)
 
 # Dimensionality of image feature vector

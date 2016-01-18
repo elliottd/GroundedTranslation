@@ -11,9 +11,10 @@ import h5py
 import logging
 import numpy as np
 import os
+import sys
 
 # Set up logger
-logging.basicConfig(level=logging.INFO)
+logging.basicConfig(level=logging.INFO, stream=sys.stdout)
 logger = logging.getLogger(__name__)
 
 # Strings for beginning, end of sentence, padding

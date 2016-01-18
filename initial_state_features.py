@@ -5,12 +5,13 @@ import numpy as np
 
 import argparse
 import logging
+import sys
 
 from data_generator import VisualWordDataGenerator
 import models
 
 # Set up logger
-logging.basicConfig(level=logging.INFO)
+logging.basicConfig(level=logging.INFO, stream=sys.stdout)
 logger = logging.getLogger(__name__)
 
 # Dimensionality of image feature vector

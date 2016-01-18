@@ -7,13 +7,14 @@ from __future__ import print_function
 import argparse
 import logging
 from math import ceil
+import sys
 
 from Callbacks import CompilationOfCallbacks
 from data_generator import VisualWordDataGenerator
 import models
 
 # Set up logger
-logging.basicConfig(level=logging.INFO)
+logging.basicConfig(level=logging.INFO, stream=sys.stdout)
 logger = logging.getLogger(__name__)
 
 # How many descriptions to use for training if "--small" is set.

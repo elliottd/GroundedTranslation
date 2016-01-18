@@ -7,9 +7,10 @@ from keras.optimizers import Adam
 import h5py
 import shutil
 import logging
+import sys
 
 # Set up logger
-logging.basicConfig(level=logging.INFO)
+logging.basicConfig(level=logging.INFO, stream=sys.stdout)
 logger = logging.getLogger(__name__)
 
 

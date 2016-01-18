@@ -20,7 +20,7 @@ import time
 from copy import deepcopy
 
 # Set up logger
-logging.basicConfig(level=logging.INFO)
+logging.basicConfig(level=logging.INFO, stream=sys.stdout)
 #logging.basicConfig(level=logging.DEBUG)
 logger = logging.getLogger(__name__)
 
