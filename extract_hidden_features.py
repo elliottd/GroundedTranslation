@@ -8,6 +8,7 @@ import logging
 import itertools
 from copy import deepcopy
 import os
+import sys
 
 from data_generator import VisualWordDataGenerator
 import models
