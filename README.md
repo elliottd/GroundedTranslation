@@ -2,7 +2,7 @@
 
 ![Alt text](https://staff.fnwi.uva.nl/d.elliott/GroundedTranslation/overview.png?raw=true "Optional Title")
 
-This is the source code that accompanies [Multilingual Image Description with Neural Sequence Models](http://arxiv.org/abs/1510.04709) by Desmond Elliott, Stella Frank, and Eva Hasler. You can use it to train multilingual multimodal language models for image description.
+This is the source code that accompanies [Multilingual Image Description with Neural Sequence Models](http://arxiv.org/abs/1510.04709) . You can use it to train multilingual multimodal language models for image description.
 
 Dependencies
 ---
