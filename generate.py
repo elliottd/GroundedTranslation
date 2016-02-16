@@ -145,7 +145,7 @@ class GroundedTranslationGenerator:
         for s in complete_sentences:
             handle.write(' '.join([x for x
                                    in itertools.takewhile(
-                                       lambda n: n != "<E>", s[1:])]) + "\n")
+                                       lambda n: n != "<E>", s)]) + "\n")
 
         handle.close()
 
