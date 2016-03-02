@@ -83,8 +83,10 @@ class GroundedTranslationGenerator:
                                        use_image=self.use_image)
 
         self.generate_sentences(self.args.checkpoint, val=not self.args.test)
-        self.bleu_score(self.args.checkpoint, val=not self.args.test)
-        self.calculate_pplx(self.args.checkpoint, val=not self.args.test)
+        
+        if not self.args.without_scores:
+            self.bleu_score(self.args.checkpoint, val=not self.args.test)
+            self.calculate_pplx(self.args.checkpoint, val=not self.args.test)
 
     def generate_sentences(self, filepath, val=True):
         """
@@ -341,6 +343,9 @@ if __name__ == "__main__":
     parser.add_argument("--source_type", type=str, default=None,
                         help="Source features over gold or predicted tokens?\
                         Expects 'gold' or 'predicted'. Required")
+    parser.add_argument("--without_scores", action="store_true",
+                        help="Don't calculate BLEU or perplexity. Useful if you\
+                        only want to see the generated sentences.")
 
     w = GroundedTranslationGenerator(parser.parse_args())
     w.generationModel()
