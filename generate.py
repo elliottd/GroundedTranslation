@@ -124,7 +124,7 @@ class GroundedTranslationGenerator:
             for i in range(N_sents):
                 w = np.argmax(arrays[0][i, t])
 
-        logger.debug(complete_sentences[3])
+        logger.debug(complete_sentences[0])
         logger.debug(self.index2word[np.argmax(arrays[0][0])])
 
         for t in range(start_gen, self.args.generation_timesteps):
