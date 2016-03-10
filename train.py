@@ -34,7 +34,7 @@ class VisualWordLSTM(object):
         self.use_image = not args.no_image
 
         if self.args.debug:
-            theano.config.optimizer = 'None'
+            theano.config.optimizer = 'fast_compile'
             theano.config.exception_verbosity = 'high'
 
     def train_model(self):
@@ -59,8 +59,10 @@ class VisualWordLSTM(object):
         # assume val data is small enough to get all at once.
         # val_input is the list passed to model.fit()
         # val_input can contain image, source features as well (or not)
-        if not self.args.enable_val_pplx:
-            val_input, valY = self.data_generator.get_data_by_split('val',
+        # We take the val_input and valY data into memory and use
+        # Keras' built-in val loss checker so we can mointor
+        # the validation data loss directly, if necessary.
+        val_input, valY = self.data_generator.get_data_by_split('val',
                                   self.use_sourcelang, self.use_image)
 
         if not self.use_sourcelang:
@@ -121,19 +123,17 @@ class VisualWordLSTM(object):
                     # let's test on the val after training on these batches
                     model.fit(train_input,
                               trainY,
-                              validation_data=None if
-                                  self.args.enable_val_pplx
-                                  else (val_input, valY),
+                              validation_data=(val_input, valY),
                               callbacks=[callbacks],
                               nb_epoch=1,
-                              verbose=1,
+                              verbose=0,
                               batch_size=self.args.batch_size,
                               shuffle=True)
                 else:
                     model.fit(train_input,
                               trainY,
                               nb_epoch=1,
-                              verbose=1,
+                              verbose=0,
                               batch_size=self.args.batch_size,
                               shuffle=True)
                 batch += 1
