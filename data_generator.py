@@ -181,7 +181,7 @@ class VisualWordDataGenerator(object):
                 training_size = SMALL_NUM_DESCRIPTIONS
 
             for data_key in dataset['train']:
-                ds = dataset['train'][data_key]['descriptions'][0:self.args_dict.num_sents]
+                ds = dataset['train'][data_key][self.ds_type][0:self.args_dict.num_sents]
                 for description in ds:
                     batch_index = num_descriptions % big_batch_size
                     # Return (filled) big_batch array
@@ -672,6 +672,8 @@ class VisualWordDataGenerator(object):
         actual_len, true_len = self.discard_percentage()
         logger.info("Retained / Original Tokens: %d / %d (%.2f pc)",
                     actual_len, true_len, 100 * float(actual_len)/true_len)
+        avg_len = self.avg_len()
+        logger.info("Average train sentence length: %.2f tokens" % avg_len)
         #logger.debug("word2index %s", self.word2index.items())
         #logger.debug("Number of indices %d", len(self.index2word))
         #logger.debug("index2word: %s", self.index2word.items())
@@ -691,6 +693,21 @@ class VisualWordDataGenerator(object):
                 unk_d = [self.word2index[w] for w in d if w in self.word2index]
                 actual_len += len(unk_d)
         return (actual_len, true_len)
+
+    def avg_len(self):
+        '''
+        One-off calculation of the average length of sentences in the training
+        data before UNKing.
+        '''
+        true_len = 0
+        num_sents = 0.0
+        split = 'train'
+        for data_key in self.dataset[split]:
+            for description in self.dataset[split][data_key][self.ds_type][0:self.args_dict.num_sents]:
+                d = description.split()
+                true_len += len(d)
+                num_sents += 1
+        return (true_len/num_sents)
 
     def format_sequence(self, sequence):
         """ Transforms one sequence (description) into input matrix
