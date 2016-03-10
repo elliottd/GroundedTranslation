@@ -13,8 +13,17 @@ args = parser.parse_args()
 
 jdata = json.load(open("%s/dataset.json" % args.path))
 print("Loaded JSON file with %d entries" % len(jdata['images']))
-features_struct = scipy.io.loadmat('%s/vgg_feats.mat' % args.path)['feats']
-print("Loaded visual features file with %d entries" % features_struct.shape[1])
+try:
+    features_struct = scipy.io.loadmat('%s/vgg_feats.mat' % args.path)['feats']
+    h5 = False
+    img_dims = features_struct.shape[0]
+    print("Loaded visual features file with %d entries with %d dims" % (features_struct.shape[1], features_struct.shape[0]))
+except NotImplementedError:
+    import h5py
+    h5 = True
+    features_struct = h5py.File('%s/vgg_feats.mat' % args.path)['feats']
+    img_dims = features_struct.shape[1]
+    print("Loaded visual features file with %d entries with %d dims" % (features_struct.shape[0], features_struct.shape[1]))
 
 if os.path.exists("%s/dataset.h5" % args.path):
     print("dataset.h5 already exists at that path. Refusing to overwrite")
@@ -24,13 +33,11 @@ h5output = h5py.File("%s/dataset.h5" % args.path, "w")
 # The HDF5 file will contain a top-level group for each split
 train = h5output.create_group("train")
 val = h5output.create_group("val")
-restval = h5output.create_group("restval") # COCO specific
 test = h5output.create_group("test")
 
 # We need these counters to enable easy indexing in downstream applications
 train_counter = 0
 val_counter = 0
-restval_counter = 0
 test_counter = 0
 
 for idx, image in enumerate(jdata['images']):
@@ -45,9 +52,6 @@ for idx, image in enumerate(jdata['images']):
   if split == "val":
     container = val.create_group("%06d" % val_counter)
     val_counter += 1
-  if split == "restval":
-    container = restval.create_group("%06d" % restval_counter)
-    restval_counter += 1
   if split == "test":
     container = test.create_group("%06d" % test_counter)
     test_counter += 1
@@ -59,9 +63,11 @@ for idx, image in enumerate(jdata['images']):
   # The visual features "Dataset" contains one vector array per image in float32
   # (Changed from per description: made dataset very large and redudant)
   image_data = container.create_dataset("img_feats",
-                                        (4096,), dtype='float32')
-                                        # (NUM_DESCRIPTIONS, 4096), dtype='float32')
-  image_data[:] = features_struct[:, idx]
+                                        (img_dims,), dtype='float32')
+  if h5:
+    image_data[:] = features_struct[idx,:]
+  else:
+    image_data[:] = features_struct[:, idx]
 
   for idx2, text in enumerate(image['sentences']):
     text_data[idx2] = " ".join(text['tokens']) #['raw']
