@@ -75,7 +75,8 @@ class VisualWordLSTM(object):
                                 self.args.optimiser, self.args.l2reg,
                                 hsn_size=hsn_size,
                                 weights=self.args.init_from_checkpoint,
-                                gru=self.args.gru)
+                                gru=self.args.gru,
+                                clipnorm=self.args.clipnorm)
 
         model = m.buildKerasModel(use_sourcelang=self.use_sourcelang,
                                   use_image=self.use_image)
@@ -237,6 +238,9 @@ if __name__ == "__main__":
                         help="minimise cross-entropy or maximise BLEU?")
     parser.add_argument("--l2reg", default=1e-8, type=float,
                         help="L2 cost penalty. Default=1e-8")
+    parser.add_argument("--clipnorm", default=-1, type=float,
+                        help="Clip gradients? (default = -1, which means\
+                        don't clip the gradients.")
 
     parser.add_argument("--unk", type=int,
                         help="unknown character cut-off. Default=3", default=3)

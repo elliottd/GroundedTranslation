@@ -17,7 +17,8 @@ logger = logging.getLogger(__name__)
 class OneLayerLSTM:
 
     def __init__(self, hidden_size, vocab_size, dropin, optimiser,
-                 l2reg, hsn_size=512, weights=None, gru=False):
+                 l2reg, hsn_size=512, weights=None, gru=False,
+                 clipnorm=-1):
         self.hidden_size = hidden_size  # number of units in first LSTM
         self.dropin = dropin  # prob. of dropping input units
         self.vocab_size = vocab_size  # size of word vocabulary
@@ -29,6 +30,7 @@ class OneLayerLSTM:
         self.beta2 = None
         self.epsilon = None
         self.lr = None
+        self.clipnorm = clipnorm
         self.gru = gru  # gru recurrent layer? (false = lstm)
 
     def buildKerasModel(self, use_sourcelang=False, use_image=True):
@@ -95,20 +97,21 @@ class OneLayerLSTM:
                                        W_regularizer=l2(self.l2reg)))
         model.add(Activation('time_distributed_softmax'))
 
-#        if self.optimiser == 'adam':
-#            # allow user-defined hyper-parameters for ADAM because it is
-#            # our preferred optimiser
-#            lr = self.lr if self.lr is not None else 0.001
-#            beta1 = self.beta1 if self.beta1 is not None else 0.9
-#            beta2 = self.beta2 if self.beta2 is not None else 0.999
-#            epsilon = self.epsilon if self.epsilon is not None else 1e-8
-#            optimiser = Adam(lr=lr, beta1=beta1,
-#                             beta2=beta2, epsilon=epsilon)
-#            model.compile(loss='categorical_crossentropy',
-#                          optimizer=optimiser)
-#        else:
-        model.compile(loss='categorical_crossentropy',
-                      optimizer=self.optimiser)
+        if self.optimiser == 'adam':
+            # allow user-defined hyper-parameters for ADAM because it is
+            # our preferred optimiser
+            lr = self.lr if self.lr is not None else 0.001
+            beta1 = self.beta1 if self.beta1 is not None else 0.9
+            beta2 = self.beta2 if self.beta2 is not None else 0.999
+            epsilon = self.epsilon if self.epsilon is not None else 1e-8
+            optimiser = Adam(lr=lr, beta1=beta1,
+                             beta2=beta2, epsilon=epsilon,
+                             clipnorm=self.clipnorm)
+            model.compile(loss='categorical_crossentropy',
+                          optimizer=optimiser)
+        else:
+            model.compile(loss='categorical_crossentropy',
+                          optimizer=self.optimiser)
 
         if self.weights is not None:
             logger.info("... with weights defined in %s", self.weights)
