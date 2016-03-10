@@ -302,13 +302,9 @@ class CompilationOfCallbacks(Callback):
         """Create arrays that are used as input for generation. """
 
         # Y_target is unused
-        if generation:
-            input_data, _ =\
-                self.data_generator.get_generation_data_by_split(prefix,
-                                    self.use_sourcelang, self.use_image)
-        else:
-            input_data, _ = self.data_generator.get_data_by_split(prefix,
-                                     self.use_sourcelang, self.use_image)
+        input_data, _ =\
+            self.data_generator.get_generation_data_by_split(prefix,
+                                self.use_sourcelang, self.use_image)
 
         # Replace input words (input_data[0]) with zeros for generation,
         # except for the first args.generate_from_N_words
@@ -385,9 +381,11 @@ class CompilationOfCallbacks(Callback):
         sys.stdout.flush()
         # print/extract each sentence until it hits the first end-of-string token
         for s in complete_sentences:
-            handle.write(' '.join([x for x
-                                   in itertools.takewhile(
-                                       lambda n: n != "<E>", s[1:])]) + "\n")
+
+            decoded_str = ' '.join([x for x
+                                    in itertools.takewhile(
+                                        lambda n: n != "<E>", s[1:])])
+            handle.write(decoded_str + "\n")
 
         handle.close()
 

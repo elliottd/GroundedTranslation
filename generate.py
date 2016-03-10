@@ -125,6 +125,7 @@ class GroundedTranslationGenerator:
         logger.debug(complete_sentences[3])
         logger.debug(self.index2word[np.argmax(arrays[0][0])])
 
+        # We are going to arg max decode a sequence.
         for t in range(start_gen, self.args.generation_timesteps):
             # we take a view of the datastructures, which means we're only
             # ever generating a prediction for the next word. This saves a
@@ -141,7 +142,7 @@ class GroundedTranslationGenerator:
             for i in range(len(next_words)):
                 complete_sentences[i].append(next_words[i])
 
-        # save each sentence until it hits the first end-of-string token
+        # serialise each sentence until it hits the first end-of-string token
         for s in complete_sentences:
             handle.write(' '.join([x for x
                                    in itertools.takewhile(
@@ -190,12 +191,7 @@ class GroundedTranslationGenerator:
         """Create arrays that are used as input for generation. """
 
         # Y_target is unused
-        #if generation:
-        #    input_data, _ =\
-        #        self.data_gen.get_generation_data_by_split(prefix,
-        #                      self.use_sourcelang, self.use_image)
-        #else:
-        input_data, _ = self.data_gen.get_data_by_split(prefix,
+        input_data, _ = self.data_gen.get_generation_data_by_split(prefix,
                            self.use_sourcelang, self.use_image)
 
         # Replace input words (input_data[0]) with zeros for generation,
