@@ -51,7 +51,10 @@ class VisualWordLSTM(object):
 
         self.data_generator = VisualWordDataGenerator(
             self.args, self.args.dataset)
-        self.data_generator.extract_vocabulary()
+        if self.args.existing_vocab != "":
+            self.data_generator.set_vocabulary(self.args.existing_vocab)
+        else:
+            self.data_generator.extract_vocabulary()
 
         self.V = self.data_generator.get_vocab_size()
 
@@ -101,7 +104,6 @@ class VisualWordLSTM(object):
             big_batch_size = self.data_generator.split_sizes['train']
             batches = 1
 
-        # for epoch in range(self.args.epochs):
         epoch = 0
         while True:
             # the program will exit with sys.exit(0) in
@@ -258,6 +260,11 @@ if __name__ == "__main__":
     parser.add_argument("--fixed_seed", action="store_true",
                         help="Start with a fixed random seed? Useful for\
                         reproding experiments. (default = False)")
+    parser.add_argument("--existing_vocab", type=str, default="",
+                        help="Use an existing vocabulary model to define the\
+                        vocabulary and UNKing in this dataset?\
+                        (default = "", which means we will derive the\
+                        vocabulary from the training dataset")
 
     arguments = parser.parse_args()
 
