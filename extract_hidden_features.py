@@ -73,8 +73,7 @@ class ExtractFinalHiddenStateActivations:
         if self.args.use_predicted_tokens and self.args.no_image == False:
             self.full_model = m.buildKerasModel(use_image=self.use_image)
 
-        if self.args.sentences_to_h5 is False:
-            self.generate_activations('train')
+        self.generate_activations('train')
         self.generate_activations('val')
         self.generate_activations('test')
 
@@ -100,21 +99,52 @@ class ExtractFinalHiddenStateActivations:
                                                          self.use_image,
                                                          return_keys=True):
 
-                # We extract the FHS from oracle training input tokens
-                hsn = self.fhs.predict(train_input,
-                                       batch_size=self.args.batch_size,
-                                       verbose=1)
+                if self.args.use_predicted_tokens is True and\
+                    self.args.no_image is False:
+                    # Reset the word indices and then generate the
+                    # descriptions of the images from scratch
+                    fixed_words = self.args.generate_from_N_words + 1
+                    train_input[0][:, fixed_words:, :] = 0
+                    predicted_words = self.generate_sentences(split,
+                                                              arrays=train_input)
+                    self.sentences_to_h5_keys(split, keys, predicted_words)
 
+                    # TODO: code duplication from make_generation_arrays
+                    pred_inputs = deepcopy(train_input)
+                    tokens = pred_inputs[0]
+                    tokens[:, fixed_words, :] = 0  # reset the inputs
+                    for prediction, words in zip(predicted_words, tokens):
+                        for idx, t in enumerate(prediction):
+                            words[idx, self.data_generator.word2index[t]] = 1.
+                    trainY = self.data_generator.get_target_descriptions(tokens)
+
+                    hsn = self.fhs.predict(train_input,
+                                           batch_size=self.args.batch_size,
+                                           verbose=1)
+
+                else:
+                    # We extract the FHS from oracle training input tokens
+                    hsn = self.fhs.predict(train_input,
+                                           batch_size=self.args.batch_size,
+                                           verbose=1)
+
+                logger.info(len(hsn))
                 for idx, h in enumerate(hsn):
                     # get final_hidden index on a sentence-by-sentence
                     # basis by searching for the first <E> in each trainY
+                    eos = False
                     for widx, warr in enumerate(trainY[idx]):
                         w = np.argmax(warr)
                         if self.data_generator.index2word[w] == "<E>":
                             final_hidden = h[widx]
                             hidden_states.append(final_hidden)
+                            eos = True
                             break
+                    if not eos:
+                        final_hidden = h[30]
+                        hidden_states.append(final_hidden)
                     batch_end += 1
+                logger.info(len(hidden_states))
 
                 # Note: serialisation happens over training batches too.
                 # now serialise the hidden representations in the h5
@@ -190,7 +220,7 @@ class ExtractFinalHiddenStateActivations:
             gen_input_data[0][:, fixed_words:, :] = 0
             return gen_input_data
 
-    def generate_sentences(self, split):
+    def generate_sentences(self, split, arrays=None):
         """
         Generates descriptions of images for --generation_timesteps
         iterations through the LSTM. Each input description is clipped to
@@ -210,7 +240,8 @@ class ExtractFinalHiddenStateActivations:
         start_gen = start_gen + 1  # include BOS
 
         # prepare the datastructures for generation (no batching over val)
-        arrays = self.make_generation_arrays(split, start_gen)
+        if arrays == None:
+            arrays = self.make_generation_arrays(split, start_gen)
         N_sents = arrays[0].shape[0]
 
         complete_sentences = [[] for _ in range(N_sents)]
@@ -287,6 +318,13 @@ class ExtractFinalHiddenStateActivations:
             self.data_generator.set_predicted_description(split, data_key,
                                                           sentences[idx][1:])
             idx += 1
+
+    def sentences_to_h5_keys(self, split, data_keys, sentences):
+        logger.info("Serialising sentences from %s to H5",
+                    split)
+        for idx, data_key in enumerate(data_keys):
+            self.data_generator.set_predicted_description(split, data_key,
+                                                    sentences[idx])
 
     def serialise_to_h5(self, split, hsn_shape, hidden_states,
                         batch_start=None, batch_end=None):
