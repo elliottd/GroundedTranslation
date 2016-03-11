@@ -83,7 +83,6 @@ class GroundedTranslationGenerator:
                                        use_image=self.use_image)
 
         self.generate_sentences(self.args.checkpoint, val=not self.args.test)
-        
         if not self.args.without_scores:
             self.bleu_score(self.args.checkpoint, val=not self.args.test)
             self.calculate_pplx(self.args.checkpoint, val=not self.args.test)
@@ -99,7 +98,6 @@ class GroundedTranslationGenerator:
         --source_vectors parameter.
         The output is clipped to the first EOS generated, if it exists.
 
-        TODO: beam search
         TODO: duplicated method with generate.py
         """
         prefix = "val" if val else "test"
@@ -127,28 +125,144 @@ class GroundedTranslationGenerator:
         logger.debug(complete_sentences[0])
         logger.debug(self.index2word[np.argmax(arrays[0][0])])
 
-        # We are going to arg max decode a sequence.
-        for t in range(start_gen, self.args.generation_timesteps):
-            # we take a view of the datastructures, which means we're only
-            # ever generating a prediction for the next word. This saves a
-            # lot of cycles.
-            preds = self.model.predict([arr[:, 0:t] for arr in arrays],
-                                       verbose=0)
-
-            # Look at the last indices for the words.
-            next_word_indices = np.argmax(preds[:, -1], axis=1)
-            # update array[0]/sentence-so-far with generated words.
+        if self.args.beam_width > 1:
+            # we are going to beam search for the most probably sentence.
+            # let's do this one sentence at a time to make the logging output
+            # easier to understand
             for i in range(N_sents):
-                arrays[0][i, t, next_word_indices[i]] = 1.
-            next_words = [self.index2word[x] for x in next_word_indices]
-            for i in range(len(next_words)):
-                complete_sentences[i].append(next_words[i])
+                max_beam_width = self.args.beam_width
+                structs = self.make_duplicate_matrices(arrays[0][i],
+                                                       arrays[1][i], 
+                                                       max_beam_width)
+                # A beam is a 2-tuple with the probability of the sequence and
+                # the words in that sequence. Start with empty beams
+                beams = [(0.0, [])]
+                # collects beams that are in the top candidates and 
+                # emitted a <E> token.
+                finished = [] 
+                for t in range(start_gen, self.args.generation_timesteps):
+                    # Store the candidates produced at timestep t, will be
+                    # pruned at the end of the timestep
+                    candidates = []
 
-        # serialise each sentence until it hits the first end-of-string token
-        for s in complete_sentences:
-            handle.write(' '.join([x for x
-                                   in itertools.takewhile(
-                                       lambda n: n != "<E>", s)]) + "\n")
+                    # we take a view of the datastructures, which means we're only
+                    # ever generating a prediction for the next word. This saves a
+                    # lot of cycles.
+                    preds = self.model.predict([arr[:, 0:t] for arr in structs],
+                                                verbose=0)
+
+                    # The last indices in preds are the predicted words
+                    next_word_indices = preds[:, -1]
+                    sorted_indices = np.argsort(-next_word_indices, axis=1)
+
+                    # Each instance in structs is holding the history of a
+                    # beam, and so there is a direct connection between the
+                    # index of a beam in beams and the index of an instance in
+                    # structs.
+                    for beam_idx, b in enumerate(beams):
+                        # get the sorted predictions for the beam_idx'th beam
+                        beam_predictions = sorted_indices[beam_idx]
+                        for top_idx in range(self.args.beam_width):
+                            wordIndex = beam_predictions[top_idx]
+                            wordProb = next_word_indices[beam_idx][beam_predictions[top_idx]]
+                            # For the beam_idxth beam, add the log probability
+                            # of the top_idxth predicted word to the previous
+                            # log probability of the sequence, and  append the 
+                            # top_idxth predicted word to the sequence of words 
+                            candidates.append([b[0] + math.log(wordProb), b[1] + [wordIndex]])
+
+                    candidates.sort(reverse = True)
+                    logger.info("Candidates in the beam")
+                    logger.info("---")
+                    for c in candidates:
+                        logger.info(" ".join([self.index2word[x] for x in c[1]]) + " (%f)" % c[0])
+
+                    beams = candidates[:max_beam_width] # prune the beams
+                    for b in beams:
+                        # If a top candidate emitted an EOS token then 
+                        # a) add it to the list of finished sequences
+                        # b) remove it from the beams and decrease the 
+                        # maximum size of the beams.
+                        if b[1][-1] == self.word2index["<E>"]:
+                            finished.append(b)
+                            beams.remove(b)
+                            if max_beam_width >= 1:
+                                max_beam_width -= 1
+
+                    logger.info("Pruned beams")
+                    logger.info("---")
+                    for b in beams:
+                        logger.info(" ".join([self.index2word[x] for x in b[1]]) + "(%f)" % b[0])
+
+                    if max_beam_width == 0:
+                        # We have sampled max_beam_width sequences with an <E>
+                        # token so stop the beam search.
+                        break
+
+                    # Reproduce the structs for the beam search so we can keep
+                    # track of the state of each beam
+                    structs = self.make_duplicate_matrices(arrays[0][i],
+                                                        arrays[1][i],
+                                                        max_beam_width)
+
+                    # Rewrite the 1-hot word features with the
+                    # so-far-predcicted tokens in a beam.
+                    for bidx, b in enumerate(beams):
+                        for idx, w in enumerate(b[1]):
+                            next_word_index = w
+                            structs[0][bidx, idx+1, w] = 1.
+
+                # If none of the sentences emitted an <E> token while
+                # decoding, add the final beams into the final candidates
+                if len(finished) == 0:
+                    for leftover in beams:
+                        finished.append(leftover)
+
+                # Normalise the probabilities by the length of the sequences
+                # as suggested by Graves (2012) http://arxiv.org/abs/1211.3711
+                for f in finished:
+                    f[0] = f[0] / len(f[1])
+                finished.sort(reverse=True)
+
+                logger.info("Length-normalised samples")
+                logger.info("---")
+                for f in finished:
+                    logger.info(" ".join([self.index2word[x] for x in f[1]]) + "(%f)" % f[0])
+
+                # Emit the lowest (log) probability sequence
+                best_beam = finished[0]
+                complete_sentences[i] = [self.index2word[x] for x in best_beam[1]]
+                handle.write(' '.join([x for x
+                                       in itertools.takewhile(
+                                           lambda n: n != "<E>", complete_sentences[i])]) + "\n")
+                logger.info("Max-prob sentence")
+                logger.info("---")
+                logger.info(' '.join([x for x
+                                      in itertools.takewhile(
+                                          lambda n: n != "<E>", complete_sentences[i])]))
+        else:
+            # We are going to arg max decode a sequence.
+            for t in range(start_gen, self.args.generation_timesteps):
+                # we take a view of the datastructures, which means we're only
+                # ever generating a prediction for the next word. This saves a
+                # lot of cycles.
+                preds = self.model.predict([arr[:, 0:t] for arr in arrays],
+                                           verbose=0)
+
+                # Look at the last indices for the words.
+                next_word_indices = np.argmax(preds[:, -1], axis=1)
+                # update array[0]/sentence-so-far with generated words.
+                for i in range(N_sents):
+                    arrays[0][i, t, next_word_indices[i]] = 1.
+                next_words = [self.index2word[x] for x in next_word_indices]
+                for i in range(len(next_words)):
+                    complete_sentences[i].append(next_words[i])
+
+            # serialise each sentence until it hits the first end-of-string token
+            for s in complete_sentences:
+                handle.write(' '.join([x for x
+                                       in itertools.takewhile(
+                                           lambda n: n != "<E>", s)]) + "\n")
 
         handle.close()
 
@@ -192,7 +306,6 @@ class GroundedTranslationGenerator:
     def make_generation_arrays(self, prefix, fixed_words, generation=False):
         """Create arrays that are used as input for generation. """
 
-        # Y_target is unused
         input_data, _ = self.data_gen.get_generation_data_by_split(prefix,
                            self.use_sourcelang, self.use_image)
 
@@ -206,6 +319,24 @@ class GroundedTranslationGenerator:
         gen_input_data[0][:, fixed_words:, :] = 0
 
         return gen_input_data
+
+    def make_duplicate_matrices(self, word_feats, img_feats, k):
+        '''
+        Prepare K duplicates of the input data for an image.
+        Useful for beam search decoding.
+        '''
+        duplicated = [[],[]]
+        for x in range(k):
+            # Make a deep copy of the word_feats structures 
+            # so the arrays will never be shared
+            duplicated[0].append(deepcopy(word_feats))
+            duplicated[1].append(img_feats)
+
+        # Turn the list of arrays into a numpy array
+        duplicated[0] = np.array(duplicated[0])
+        duplicated[1] = np.array(duplicated[1])
+
+        return duplicated
 
     def calculate_pplx(self, directory, val=True):
         """ Without batching. Robust against multiple descriptions/image,
@@ -340,8 +471,9 @@ if __name__ == "__main__":
                         help="Source features over gold or predicted tokens?\
                         Expects 'gold' or 'predicted'. Required")
     parser.add_argument("--without_scores", action="store_true",
-                        help="Don't calculate BLEU or perplexity. Useful if you\
-                        only want to see the generated sentences.")
+                        help="Don't calculate BLEU or perplexity. Useful if\
+                        you only want to see the generated sentences.")
+    parser.add_argument("--beam_width", type=int, default=1)
 
     w = GroundedTranslationGenerator(parser.parse_args())
     w.generationModel()
