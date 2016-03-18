@@ -178,6 +178,7 @@ class GroundedTranslationGenerator:
                         logger.info(" ".join([self.index2word[x] for x in c[1]]) + " (%f)" % c[0])
 
                     beams = candidates[:max_beam_width] # prune the beams
+                    pruned = []
                     for b in beams:
                         # If a top candidate emitted an EOS token then 
                         # a) add it to the list of finished sequences
@@ -185,9 +186,12 @@ class GroundedTranslationGenerator:
                         # maximum size of the beams.
                         if b[1][-1] == self.word2index["<E>"]:
                             finished.append(b)
-                            beams.remove(b)
                             if max_beam_width >= 1:
                                 max_beam_width -= 1
+                        else:
+                            pruned.append(b)
+                    
+                    beams = pruned[:max_beam_width]
 
                     logger.info("Pruned beams")
                     logger.info("---")
