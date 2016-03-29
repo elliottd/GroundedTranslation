@@ -11,6 +11,7 @@ import logging
 import numpy as np
 import os
 import sys
+import random
 
 # Set up logger
 logging.basicConfig(level=logging.INFO, stream=sys.stdout)
@@ -26,7 +27,7 @@ PAD = "<P>"  # index 0
 IMG_FEATS = 4096
 
 # How many descriptions to use for training if "--small" is set.
-SMALL_NUM_DESCRIPTIONS = 3000
+SMALL_NUM_DESCRIPTIONS = 300
 SMALL_VAL = 100
 
 
@@ -374,15 +375,13 @@ class VisualWordDataGenerator(object):
             # d_idx (number of descriptions before break) is new size.
             arrays = self.resize_arrays(d_idx, arrays)
 
-        targets = self.get_target_descriptions(arrays[0])
-
         logger.debug("actual max_seq_len in split %s: %d",
                     split, self.actual_max_seq_len)
         logger.debug("dscrp_array size: %s", arrays[0].shape)
         # TODO: truncate dscrp_array, img_array, targets
         # to actual_max_seq_len (+ padding)
 
-        return (arrays, targets)
+        return arrays
 
     def get_data_by_split(self, split, use_sourcelang=False, use_image=True):
         """ Gets all input data for model for a given split (ie. train, val,
@@ -460,6 +459,16 @@ class VisualWordDataGenerator(object):
             self._cached_val_targets = targets
 
         return (arrays, targets)
+
+    def get_one_image_features_matrix(self, dataset, split, datakey):
+        """ Creates the image features matrix/vector for a dataset split.
+        Note that only the first (zero timestep) cell in the second dimension
+        will be non-zero.
+        """
+
+        img_array = np.zeros((self.max_seq_len, IMG_FEATS))
+        img_array[0, :] = self.get_image_features(dataset, split, datakey)
+        return img_array
 
     def get_image_features_matrix(self, split):
         """ Creates the image features matrix/vector for a dataset split.
@@ -759,3 +768,60 @@ class VisualWordDataGenerator(object):
         target_array = np.zeros(input_array.shape)
         target_array[:, :-1, :] = input_array[:, 1:, :]
         return target_array
+        
+    def get_target_array(self, input_array):
+        """ Target is always _next_ word, so we move input_array over by -1
+        timestep (target at t=1 is input at t=2).
+        """
+        target_array = np.zeros(input_array.shape)
+        target_array[:-1, :] = input_array[1:, :]
+        return target_array
+
+    def generator_for_split(self, split):
+        "Generator that produces input/output tuples for a given dataset and split."
+        # For randomization, we use a independent Random instance. We seed it using
+        # a fixed number to ensure replicability.
+        random_instance = random.Random()
+        random_instance.seed(1234)
+        # Make sure that the desired split is actually in the dataset.
+        assert split in self.dataset
+        # Get a list of the keys. We will use this list to shuffle and iterate over.
+        identifiers = self.dataset[split].keys()
+        # Get the number of descriptions.
+        first_id = identifiers[0]
+        num_descriptions = len(self.dataset[split][first_id]['descriptions'])
+        description_indices = list(range(num_descriptions))
+
+        # Infinite loop, that is limited by the number of calls to the generator.
+        while True:
+            # Shuffle the description indices.
+            random_instance.shuffle(description_indices)
+            # And loop over them.
+            for desc_idx in description_indices:
+                # For each iteration over the description indices, also shuffle the
+                # identifiers.
+                random_instance.shuffle(identifiers)
+                # And loop over them.
+                for ident in identifiers:
+                    description = self.dataset[split][ident]['descriptions'][desc_idx]
+                    img_feats = self.get_one_image_features_matrix(self.dataset, split, ident)
+                    try:
+                        description_array = self.format_sequence(description.split())
+                        targets = self.get_target_array(description_array)
+                        yield {'text': description_array, 'img':img_feats,
+                                'output': targets}
+                    except AssertionError:
+                        # If the description doesn't share any words with the vocabulary.
+                        pass
+
+    def valGenerator(self):
+        "Generator for the val data, without randomization."
+        for ident in self.dataset['val']:
+            for description in self.dataset['val'][ident]['descriptions']:
+                features = self.dataset[split][ident]['img_feats'].value
+                try:
+                    description_as_array = self.format_sequence(description.split())
+                    yield (features, description_as_array)
+                except AssertionError:
+                    # If the description doesn't share any words with the vocabulary.
+                    pass

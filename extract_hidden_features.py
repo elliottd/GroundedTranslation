@@ -195,10 +195,10 @@ class ExtractFinalHiddenStateActivations:
         Create arrays that are used as input for generation / activation.
         '''
 
-        input_data, targets = self.data_generator.get_data_by_split(prefix,
-                                       self.use_sourcelang, self.use_image)
 
         if predicted_tokens is not None:
+            input_data, targets = self.data_generator.get_data_by_split(prefix,
+                                           self.use_sourcelang, self.use_image)
             logger.info("Initialising generation arrays with predicted tokens")
             gen_input_data = deepcopy(input_data)
             tokens = gen_input_data[0]
@@ -214,6 +214,8 @@ class ExtractFinalHiddenStateActivations:
             # except for the first args.generate_from_N_words
             # NOTE: this will include padding and BOS steps (fixed_words has been
             # incremented accordingly already in generate_sentences().)
+            input_data = self.data_generator.get_generation_data_by_split(prefix,
+                                           self.use_sourcelang, self.use_image)
             logger.info("Initialising with the first %d gold words (incl BOS)",
                         fixed_words)
             gen_input_data = deepcopy(input_data)

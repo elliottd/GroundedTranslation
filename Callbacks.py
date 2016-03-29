@@ -5,6 +5,7 @@ from __future__ import division
 
 from keras.callbacks import Callback  # ModelCheckpoint , EarlyStopping
 
+import matplotlib.pyplot as plt
 import h5py
 import itertools
 import logging
@@ -18,6 +19,8 @@ from time import gmtime, strftime
 import math
 import time
 from copy import deepcopy
+
+from memory_profiler import profile
 
 # Set up logger
 logging.basicConfig(level=logging.INFO, stream=sys.stdout)
@@ -33,7 +36,8 @@ class CompilationOfCallbacks(Callback):
     """ Collection of compiled callbacks."""
 
     def __init__(self, word2index, index2word, argsDict, dataset,
-                 data_generator, use_sourcelang=False, use_image=True):
+                 data_generator, expected_batches, use_sourcelang=False, 
+                 use_image=True):
         super(Callback, self).__init__()
 
         self.verbose = True
@@ -52,6 +56,10 @@ class CompilationOfCallbacks(Callback):
         self.word2index = word2index
         self.index2word = index2word
         self.args = argsDict
+
+        self.exp_batches = expected_batches
+        self.batch_losses = []
+        self.val_losses = []
 
         # used to control early stopping on the validation data
         self.wait = 0
@@ -75,6 +83,23 @@ class CompilationOfCallbacks(Callback):
         if self.args.source_vectors is not None:
             self.source_dataset = h5py.File("%s/dataset.h5" % self.args.source_vectors, "r")
 
+        subprocess.check_call(["touch checkpoints/%s/val_losses" % self.args.run_string], shell=True)
+
+    def loss_to_disk(self, loss, loss_type):
+        filepath = "checkpoints/%s" % self.args.run_string
+        if loss_type == 'train':
+            h = open('%s/batch_losses' % filepath, 'a')
+            h.write("%f\n" % loss)
+            h.close()
+        elif loss_type == 'val':
+            h = open('%s/val_losses' % filepath, 'a')
+            h.write("%f\n" % loss)
+            h.close()
+
+    def on_batch_end(self, batch, logs={}):
+        self.loss_to_disk(logs.get('loss'), loss_type='train')
+        self.track_loss()
+
     def on_epoch_end(self, epoch, logs={}):
         '''
         At the end of each epoch we
@@ -88,17 +113,53 @@ class CompilationOfCallbacks(Callback):
         savetime = strftime("%d%m%Y-%H%M%S", gmtime())
         path = self.create_checkpoint_directory(savetime)
         self.save_run_arguments(path)
+        self.loss_to_disk(logs.get('val_loss'), loss_type='val')
+        self.track_loss()
 
         # Generate training and val sentences to check for overfitting
         # self.generate_sentences(path, val=False)
         # bleu = self.__bleu_score__(path, val=False)
         if self.args.enable_val_pplx:
-            val_pplx = self.calculate_pplx()
+            val_pplx = self.calculate_pplx(path)
         self.generate_sentences(path)
         val_bleu = self.__bleu_score__(path)
 
         self.early_stop_decision(len(self.val_bleu)+1, val_bleu, val_pplx)
         self.checkpoint_parameters(epoch, logs, path, val_bleu, val_pplx)
+
+    def track_loss(self, both=False):
+        '''
+        pyplot the loss accrued at each batch while training.
+        Always overwrites the previous plot.
+        '''
+
+        return
+
+        with open('checkpoints/%s/batch_losses' % self.args.run_string) as f:
+            tdata = f.read()
+        tdata = tdata.split('\n')
+        print(tdata)
+        tdata = [float(x) for x in tdata[:-1]]
+
+        with open("checkpoints/%s/val_losses" % self.args.run_string) as f:
+            vdata = f.read()
+        vdata = vdata.split('\n')
+        vdata = [float(y) for y in vdata[:-1]]
+        if len(vdata) != 0:
+            print(vdata)
+            print(tdata)
+            vx = [x for x in range(1, len(tdata),
+                self.exp_batches)]
+            print(vx)
+            plt.plot(vx, vdata, 'ro-')
+
+        plt.plot(tdata, c='b')
+        plt.title("Loss")
+        plt.ylabel("Loss")
+        plt.xlabel("Batch #")
+        plt.savefig('%s/train_loss.pdf' % ('checkpoints/%s/' %
+            self.args.run_string))
+        plt.close()
 
     def early_stop_decision(self, epoch, val_bleu, val_pplx):
         '''
@@ -108,7 +169,7 @@ class CompilationOfCallbacks(Callback):
         WARNING: quits with sys.exit(0).
         '''
 
-        if val_bleu > self.best_val_bleu:
+        if val_bleu > self.best_val_bleu or self.args.no_early_stopping:
             self.wait = 0
         else:
             self.wait += 1
@@ -190,6 +251,7 @@ class CompilationOfCallbacks(Callback):
             codecs.open('%s/%s_reference.ref%d' % (directory, split, refid),
                         'w', 'utf-8').write('\n'.join([x[refid] for x in references]))
                         #'w', 'utf-8').write('\n'.join(['\n'.join(x) for x in references]))
+        return references
 
     def __bleu_score__(self, directory, val=True):
         '''
@@ -298,13 +360,17 @@ class CompilationOfCallbacks(Callback):
             # yield split_indices[i:i+batch_size]
             yield (i, i+batch_size-1)
 
+    @profile
     def make_generation_arrays(self, prefix, fixed_words, generation=False):
         """Create arrays that are used as input for generation. """
 
-        # Y_target is unused
-        input_data, _ =\
-            self.data_generator.get_generation_data_by_split(prefix,
-                                self.use_sourcelang, self.use_image)
+        if prefix == 'val':
+            # Don't duplicate resources if we can avoid it
+            input_data = self.data_generator._cached_val_input
+        else:
+            input_data =\
+                self.data_generator.get_generation_data_by_split(prefix,
+                                    self.use_sourcelang, self.use_image)
 
         # Replace input words (input_data[0]) with zeros for generation,
         # except for the first args.generate_from_N_words
@@ -317,6 +383,7 @@ class CompilationOfCallbacks(Callback):
 
         return gen_input_data
 
+    @profile
     def generate_sentences(self, filepath, val=True):
         """
         Generates descriptions of images for --generation_timesteps
@@ -389,34 +456,56 @@ class CompilationOfCallbacks(Callback):
 
         handle.close()
 
-    def calculate_pplx(self, val=True):
+    @profile
+    def calculate_pplx(self, path, val=True):
         """ Without batching. Robust against multiple descriptions/image,
-        since it uses data_generator.get_data_by_split input. """
+        since it uses data_generator.get_data_by_split input. 
+        We ignore OOV tokens, in line with other toolkits. See (D1) e.g.
+        http://www.speech.sri.com/projects/srilm/manpages/srilm-faq.7.html
+
+        Updated to prepare the Y_target data from the raw text instead of
+        bundling it up as a 1-hot vector.
+        """
         prefix = "val" if val else "test"
         logger.info("Calculating pplx over %s data", prefix)
-        sum_logprobs = 0
+        sum_logprobs = 0.0
         y_len = 0
-        input_data, Y_target = self.data_generator.get_data_by_split(prefix,
+
+        if val:
+            # Don't duplicate resources if we can avoid it
+            input_data = self.data_generator._cached_val_input
+            Y_target = self.extract_references(path, 'val')
+        else:
+            input_data = self.data_generator.get_generation_data_by_split(prefix,
                                        self.use_sourcelang, self.use_image)
+            Y_target = self.extract_references(path, 'test')
 
         if self.args.debug:
             tic = time.time()
 
         preds = self.model.predict(input_data, verbose=0)
+        unk_p = 1e-20
 
         if self.args.debug:
             logger.info("Forward pass took %f", time.time()-tic)
 
-        for t in range(Y_target.shape[1]):
-            for i in range(Y_target.shape[0]):
-                target_idx = np.argmax(Y_target[i, t])
-                if self.index2word[target_idx] != "<P>":
-                    log_p = math.log(preds[i, t, target_idx],2)
-                    #logprobs.append(log_p)
-                    sum_logprobs += -log_p
-                    y_len += 1
+        for img in Y_target:
+            i = 0
+            for sent in img:
+                t = 0
+                for w in sent.split(" "):
+                    try:
+                        target_idx = self.word2index[w]
+                        log_p = math.log(preds[i, t, target_idx], 2)
+                        sum_logprobs += -log_p
+                        y_len += 1
+                    except KeyError:
+                        pass
+                    t += 1
+            i += 1
 
         norm_logprob = sum_logprobs / y_len
         pplx = math.pow(2, norm_logprob)
         logger.info("PPLX: %.4f", pplx)
         return pplx
+

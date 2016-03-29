@@ -306,7 +306,7 @@ class GroundedTranslationGenerator:
     def make_generation_arrays(self, prefix, fixed_words, generation=False):
         """Create arrays that are used as input for generation. """
 
-        input_data, _ = self.data_gen.get_generation_data_by_split(prefix,
+        input_data = self.data_gen.get_generation_data_by_split(prefix,
                            self.use_sourcelang, self.use_image)
 
         # Replace input words (input_data[0]) with zeros for generation,

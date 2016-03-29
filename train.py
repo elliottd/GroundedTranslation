@@ -9,16 +9,20 @@ import logging
 from math import ceil
 import sys
 
+import matplotlib as plt
+
 from Callbacks import CompilationOfCallbacks
 from data_generator import VisualWordDataGenerator
 import models
+
+import keras.callbacks
 
 # Set up logger
 logging.basicConfig(level=logging.INFO, stream=sys.stdout)
 logger = logging.getLogger(__name__)
 
 # How many descriptions to use for training if "--small" is set.
-SMALL_NUM_DESCRIPTIONS = 3000
+SMALL_NUM_DESCRIPTIONS = 300
 
 
 class VisualWordLSTM(object):
@@ -84,18 +88,11 @@ class VisualWordLSTM(object):
         model = m.buildKerasModel(use_sourcelang=self.use_sourcelang,
                                   use_image=self.use_image)
 
-        callbacks = CompilationOfCallbacks(self.data_generator.word2index,
-                                           self.data_generator.index2word,
-                                           self.args,
-                                           self.args.dataset,
-                                           self.data_generator,
-                                           use_sourcelang=self.use_sourcelang,
-                                           use_image=self.use_image)
-
         big_batch_size = self.args.big_batch_size
         if big_batch_size > 0:
             if self.args.small:
                 batches = ceil(SMALL_NUM_DESCRIPTIONS/self.args.big_batch_size)
+                big_batch_size = SMALL_NUM_DESCRIPTIONS
             else:
                 batches = ceil(float(self.data_generator.split_sizes['train']) /
                                self.args.big_batch_size)
@@ -103,6 +100,30 @@ class VisualWordLSTM(object):
         else:  # if big_batch_size == 0, reset to training set size.
             big_batch_size = self.data_generator.split_sizes['train']
             batches = 1
+
+        callbacks = CompilationOfCallbacks(self.data_generator.word2index,
+                                           self.data_generator.index2word,
+                                           self.args,
+                                           self.args.dataset,
+                                           self.data_generator,
+                                           3,
+                                           use_sourcelang=self.use_sourcelang,
+                                           use_image=self.use_image)
+
+        #monitor = keras.callbacks.RemoteMonitor(root='http://localhost:9000')
+
+        #train_generator = self.data_generator.generator_for_split('train')
+        #val_generator = self.data_generator.generator_for_split('val')
+
+        #train_size = self.data_generator.split_sizes['train']
+        #val_size = self.data_generator.split_sizes['val']
+        #model.fit_generator(generator=train_generator,
+        #                    samples_per_epoch= train_size,
+        #                    nb_epoch= self.args.max_epochs, # We can use callbacks to exit earlier.
+        #                    verbose=1,
+        #                    callbacks=[callbacks],
+        #                    validation_data=val_generator,
+        #                    nb_val_samples=val_size)
 
         epoch = 0
         while True:
@@ -124,19 +145,20 @@ class VisualWordLSTM(object):
 
                 if indicator is True:
                     # let's test on the val after training on these batches
-                    model.fit(train_input,
+                    loss = model.fit(train_input,
                               trainY,
                               validation_data=(val_input, valY),
                               callbacks=[callbacks],
                               nb_epoch=1,
-                              verbose=0,
+                              verbose=1,
                               batch_size=self.args.batch_size,
                               shuffle=True)
                 else:
-                    model.fit(train_input,
+                    loss = model.fit(train_input,
                               trainY,
                               nb_epoch=1,
-                              verbose=0,
+                              callbacks=[callbacks],
+                              verbose=1,
                               batch_size=self.args.batch_size,
                               shuffle=True)
                 batch += 1
@@ -265,6 +287,7 @@ if __name__ == "__main__":
                         vocabulary and UNKing in this dataset?\
                         (default = "", which means we will derive the\
                         vocabulary from the training dataset")
+    parser.add_argument("--no_early_stopping", action="store_true")
 
     arguments = parser.parse_args()
 
