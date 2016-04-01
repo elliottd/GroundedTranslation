@@ -62,110 +62,54 @@ class VisualWordLSTM(object):
 
         self.V = self.data_generator.get_vocab_size()
 
-        # Keras doesn't do batching of val set, so
-        # assume val data is small enough to get all at once.
-        # val_input is the list passed to model.fit()
-        # val_input can contain image, source features as well (or not)
-        # We take the val_input and valY data into memory and use
-        # Keras' built-in val loss checker so we can mointor
-        # the validation data loss directly, if necessary.
-        val_input, valY = self.data_generator.get_data_by_split('val',
-                                  self.use_sourcelang, self.use_image)
-
         if not self.use_sourcelang:
             hsn_size = 0
         else:
             hsn_size = self.data_generator.hsn_size  # ick
 
-        m = models.OneLayerLSTM(self.args.hidden_size, self.V,
-                                self.args.dropin,
-                                self.args.optimiser, self.args.l2reg,
-                                hsn_size=hsn_size,
-                                weights=self.args.init_from_checkpoint,
-                                gru=self.args.gru,
-                                clipnorm=self.args.clipnorm)
+        if self.args.mrnn:
+            m = models.MRNN(self.args.hidden_size, self.V,
+                           self.args.dropin,
+                           self.args.optimiser, self.args.l2reg,
+                           hsn_size=hsn_size,
+                           weights=self.args.init_from_checkpoint,
+                           gru=self.args.gru,
+                           clipnorm=self.args.clipnorm,
+                           t=self.data_generator.max_seq_len)
+        else:
+            m = models.NIC(self.args.hidden_size, self.V,
+                           self.args.dropin,
+                           self.args.optimiser, self.args.l2reg,
+                           hsn_size=hsn_size,
+                           weights=self.args.init_from_checkpoint,
+                           gru=self.args.gru,
+                           clipnorm=self.args.clipnorm,
+                           t=self.data_generator.max_seq_len)
 
         model = m.buildKerasModel(use_sourcelang=self.use_sourcelang,
                                   use_image=self.use_image)
-
-        big_batch_size = self.args.big_batch_size
-        if big_batch_size > 0:
-            if self.args.small:
-                batches = ceil(SMALL_NUM_DESCRIPTIONS/self.args.big_batch_size)
-                big_batch_size = SMALL_NUM_DESCRIPTIONS
-            else:
-                batches = ceil(float(self.data_generator.split_sizes['train']) /
-                               self.args.big_batch_size)
-            batches = int(batches)
-        else:  # if big_batch_size == 0, reset to training set size.
-            big_batch_size = self.data_generator.split_sizes['train']
-            batches = 1
 
         callbacks = CompilationOfCallbacks(self.data_generator.word2index,
                                            self.data_generator.index2word,
                                            self.args,
                                            self.args.dataset,
                                            self.data_generator,
-                                           3,
                                            use_sourcelang=self.use_sourcelang,
                                            use_image=self.use_image)
 
-        #monitor = keras.callbacks.RemoteMonitor(root='http://localhost:9000')
+        train_generator = self.data_generator.generator_for_split('val')
+        train_size = self.data_generator.split_sizes['val']
+        val_generator = self.data_generator.valGenerator()
+        val_size = self.data_generator.split_sizes['val']
 
-        #train_generator = self.data_generator.generator_for_split('train')
-        #val_generator = self.data_generator.generator_for_split('val')
-
-        #train_size = self.data_generator.split_sizes['train']
-        #val_size = self.data_generator.split_sizes['val']
-        #model.fit_generator(generator=train_generator,
-        #                    samples_per_epoch= train_size,
-        #                    nb_epoch= self.args.max_epochs, # We can use callbacks to exit earlier.
-        #                    verbose=1,
-        #                    callbacks=[callbacks],
-        #                    validation_data=val_generator,
-        #                    nb_val_samples=val_size)
-
-        epoch = 0
-        while True:
-            # the program will exit with sys.exit(0) in
-            # Callbacks.early_stop_decision(). Do not put any clean-up
-            # after this loop. It will NEVER be executed!
-            batch = 1
-            for train_input, trainY, indicator in\
-                self.data_generator.yield_training_batch(big_batch_size,
-                                                         self.use_sourcelang,
-                                                         self.use_image):
-
-                if self.args.predefined_epochs:
-                    logger.info("Epoch %d/%d, big-batch %d/%d", epoch+1,
-                                self.args.max_epochs, batch, batches)
-                else:
-                    logger.info("Epoch %d, big-batch %d/%d", epoch+1,
-                                batch, batches)
-
-                if indicator is True:
-                    # let's test on the val after training on these batches
-                    loss = model.fit(train_input,
-                              trainY,
-                              validation_data=(val_input, valY),
-                              callbacks=[callbacks],
-                              nb_epoch=1,
-                              verbose=1,
-                              batch_size=self.args.batch_size,
-                              shuffle=True)
-                else:
-                    loss = model.fit(train_input,
-                              trainY,
-                              nb_epoch=1,
-                              callbacks=[callbacks],
-                              verbose=1,
-                              batch_size=self.args.batch_size,
-                              shuffle=True)
-                batch += 1
-            epoch += 1
-            if self.args.predefined_epochs and epoch >= self.args.max_epochs:
-                # stop training because we've exceeded self.args.max_epochs
-                break
+        model.fit_generator(generator=train_generator,
+                            samples_per_epoch=train_size,
+                            nb_epoch= self.args.max_epochs,
+                            verbose=1,
+                            callbacks=[callbacks],
+                            nb_worker=1,
+                            validation_data=val_generator,
+                            nb_val_samples=val_size)
 
     def log_run_arguments(self):
         '''
@@ -288,6 +232,10 @@ if __name__ == "__main__":
                         (default = "", which means we will derive the\
                         vocabulary from the training dataset")
     parser.add_argument("--no_early_stopping", action="store_true")
+
+    parser.add_argument("--mrnn", action="store_true", 
+                        help="Use a Mao-style multimodal recurrent neural\
+                        network?")
 
     arguments = parser.parse_args()
 

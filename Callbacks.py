@@ -36,8 +36,7 @@ class CompilationOfCallbacks(Callback):
     """ Collection of compiled callbacks."""
 
     def __init__(self, word2index, index2word, argsDict, dataset,
-                 data_generator, expected_batches, use_sourcelang=False, 
-                 use_image=True):
+                 data_generator, use_sourcelang=False, use_image=True):
         super(Callback, self).__init__()
 
         self.verbose = True
@@ -56,10 +55,6 @@ class CompilationOfCallbacks(Callback):
         self.word2index = word2index
         self.index2word = index2word
         self.args = argsDict
-
-        self.exp_batches = expected_batches
-        self.batch_losses = []
-        self.val_losses = []
 
         # used to control early stopping on the validation data
         self.wait = 0
@@ -85,21 +80,6 @@ class CompilationOfCallbacks(Callback):
 
         subprocess.check_call(["touch checkpoints/%s/val_losses" % self.args.run_string], shell=True)
 
-    def loss_to_disk(self, loss, loss_type):
-        filepath = "checkpoints/%s" % self.args.run_string
-        if loss_type == 'train':
-            h = open('%s/batch_losses' % filepath, 'a')
-            h.write("%f\n" % loss)
-            h.close()
-        elif loss_type == 'val':
-            h = open('%s/val_losses' % filepath, 'a')
-            h.write("%f\n" % loss)
-            h.close()
-
-    def on_batch_end(self, batch, logs={}):
-        self.loss_to_disk(logs.get('loss'), loss_type='train')
-        self.track_loss()
-
     def on_epoch_end(self, epoch, logs={}):
         '''
         At the end of each epoch we
@@ -113,12 +93,8 @@ class CompilationOfCallbacks(Callback):
         savetime = strftime("%d%m%Y-%H%M%S", gmtime())
         path = self.create_checkpoint_directory(savetime)
         self.save_run_arguments(path)
-        self.loss_to_disk(logs.get('val_loss'), loss_type='val')
-        self.track_loss()
 
         # Generate training and val sentences to check for overfitting
-        # self.generate_sentences(path, val=False)
-        # bleu = self.__bleu_score__(path, val=False)
         if self.args.enable_val_pplx:
             val_pplx = self.calculate_pplx(path)
         self.generate_sentences(path)
@@ -126,40 +102,7 @@ class CompilationOfCallbacks(Callback):
 
         self.early_stop_decision(len(self.val_bleu)+1, val_bleu, val_pplx)
         self.checkpoint_parameters(epoch, logs, path, val_bleu, val_pplx)
-
-    def track_loss(self, both=False):
-        '''
-        pyplot the loss accrued at each batch while training.
-        Always overwrites the previous plot.
-        '''
-
-        return
-
-        with open('checkpoints/%s/batch_losses' % self.args.run_string) as f:
-            tdata = f.read()
-        tdata = tdata.split('\n')
-        print(tdata)
-        tdata = [float(x) for x in tdata[:-1]]
-
-        with open("checkpoints/%s/val_losses" % self.args.run_string) as f:
-            vdata = f.read()
-        vdata = vdata.split('\n')
-        vdata = [float(y) for y in vdata[:-1]]
-        if len(vdata) != 0:
-            print(vdata)
-            print(tdata)
-            vx = [x for x in range(1, len(tdata),
-                self.exp_batches)]
-            print(vx)
-            plt.plot(vx, vdata, 'ro-')
-
-        plt.plot(tdata, c='b')
-        plt.title("Loss")
-        plt.ylabel("Loss")
-        plt.xlabel("Batch #")
-        plt.savefig('%s/train_loss.pdf' % ('checkpoints/%s/' %
-            self.args.run_string))
-        plt.close()
+        self.log_performance()
 
     def early_stop_decision(self, epoch, val_bleu, val_pplx):
         '''
@@ -184,14 +127,12 @@ class CompilationOfCallbacks(Callback):
                     handle.close()
                     sys.exit(0)
 
-    def on_train_end(self, logs={}):
+    def log_performance(self):
         '''
         Record model performance so far, based on whether we are tracking
         validation loss or validation pplx.
         '''
         handle = open("checkpoints/%s/summary" % self.args.run_string, "w")
-        logger.info("Training complete")
-        handle.write("Training complete \n")
 
         for epoch in range(len(self.val_pplx)):
             if self.args.enable_val_pplx:
@@ -323,16 +264,16 @@ class CompilationOfCallbacks(Callback):
             if cur_val_loss < self.best_val_loss:
                 self.best_val_loss = cur_val_loss
 
-            logger.info("Checkpoint %d: | val loss %0.5f (best: %0.5f) bleu %0.2f (best %0.2f)", 
-                        (len(self.val_loss) + 1),
-                        cur_val_loss, self.best_val_loss, cur_val_bleu,
-                        self.best_val_bleu)
+            #logger.info("Checkpoint %d: | val loss %0.5f (best: %0.5f) bleu %0.2f (best %0.2f)", 
+            #            (len(self.val_loss) + 1),
+            #            cur_val_loss, self.best_val_loss, cur_val_bleu,
+            #            self.best_val_bleu)
 
         if self.args.enable_val_pplx:
-            logger.info("Checkpoint %d: | val pplx %0.5f (best: %0.5f) bleu %0.2f (best %0.2f)", 
-                        (len(self.val_pplx) + 1),
-                        cur_val_pplx, self.best_val_pplx, cur_val_bleu,
-                        self.best_val_bleu)
+            #logger.info("Checkpoint %d: | val pplx %0.5f (best: %0.5f) bleu %0.2f (best %0.2f)", 
+            #            (len(self.val_pplx) + 1),
+            #            cur_val_pplx, self.best_val_pplx, cur_val_bleu,
+            #            self.best_val_bleu)
             self.val_pplx.append(cur_val_pplx)
             if cur_val_pplx < self.best_val_pplx:
                 self.best_val_pplx = cur_val_pplx
@@ -360,7 +301,6 @@ class CompilationOfCallbacks(Callback):
             # yield split_indices[i:i+batch_size]
             yield (i, i+batch_size-1)
 
-    @profile
     def make_generation_arrays(self, prefix, fixed_words, generation=False):
         """Create arrays that are used as input for generation. """
 
@@ -383,7 +323,6 @@ class CompilationOfCallbacks(Callback):
 
         return gen_input_data
 
-    @profile
     def generate_sentences(self, filepath, val=True):
         """
         Generates descriptions of images for --generation_timesteps
@@ -427,14 +366,13 @@ class CompilationOfCallbacks(Callback):
         logger.debug('t=start+1, %s', np.argmax(arrays[0][0, start_gen+1,:]))
 
         for t in range(start_gen, self.args.generation_timesteps):
-            # we take a view of the datastructures, which means we're only
-            # ever generating a prediction for the next word. This saves a
-            # lot of cycles.
-            preds = self.model.predict([arr[:, 0:t] for arr in arrays],
-                                       verbose=0)
+            logger.debug("Input token: %s" % self.index2word[np.argmax(arrays[0][0,t-1])])
+            preds = self.model.predict({'text': arrays[0],
+                                        'img':  arrays[1]}, verbose=0)
 
             # Look at the last indices for the words.
-            next_word_indices = np.argmax(preds[:, -1], axis=1)
+            next_word_indices = np.argmax(preds['output'][:, t-1], axis=1)
+            logger.debug("Predicted token: %s" % self.index2word[next_word_indices[0]])
             # update array[0]/sentence-so-far with generated words.
             for i in range(N_sents):
                 arrays[0][i, t, next_word_indices[i]] = 1.
@@ -442,13 +380,9 @@ class CompilationOfCallbacks(Callback):
             for i in range(len(next_words)):
                 complete_sentences[i].append(next_words[i])
 
-        logger.debug("At t=%d Sentence 0 %s ", t, complete_sentences[0])
-        logger.debug("At t=%d Sentence 9 %s ", t, complete_sentences[9])
-
         sys.stdout.flush()
         # print/extract each sentence until it hits the first end-of-string token
         for s in complete_sentences:
-
             decoded_str = ' '.join([x for x
                                     in itertools.takewhile(
                                         lambda n: n != "<E>", s[1:])])
@@ -456,7 +390,6 @@ class CompilationOfCallbacks(Callback):
 
         handle.close()
 
-    @profile
     def calculate_pplx(self, path, val=True):
         """ Without batching. Robust against multiple descriptions/image,
         since it uses data_generator.get_data_by_split input. 
@@ -471,38 +404,25 @@ class CompilationOfCallbacks(Callback):
         sum_logprobs = 0.0
         y_len = 0
 
-        if val:
-            # Don't duplicate resources if we can avoid it
-            input_data = self.data_generator._cached_val_input
-            Y_target = self.extract_references(path, 'val')
-        else:
-            input_data = self.data_generator.get_generation_data_by_split(prefix,
+        input_data, Y_target = self.data_generator.get_data_by_split(prefix,
                                        self.use_sourcelang, self.use_image)
-            Y_target = self.extract_references(path, 'test')
 
         if self.args.debug:
             tic = time.time()
 
-        preds = self.model.predict(input_data, verbose=0)
-        unk_p = 1e-20
+        preds = self.model.predict({'text': input_data[0],
+                                    'img': input_data[1]}, verbose=0)
 
         if self.args.debug:
             logger.info("Forward pass took %f", time.time()-tic)
 
-        for img in Y_target:
-            i = 0
-            for sent in img:
-                t = 0
-                for w in sent.split(" "):
-                    try:
-                        target_idx = self.word2index[w]
-                        log_p = math.log(preds[i, t, target_idx], 2)
-                        sum_logprobs += -log_p
-                        y_len += 1
-                    except KeyError:
-                        pass
-                    t += 1
-            i += 1
+        for t in range(Y_target.shape[1]):
+            for i in range(Y_target.shape[0]):
+                target_idx = np.argmax(Y_target[i, t])
+                if self.index2word[target_idx] != "<P>":
+                    log_p = math.log(preds['output'][i, t, target_idx],2)
+                    sum_logprobs += -log_p
+                    y_len += 1
 
         norm_logprob = sum_logprobs / y_len
         pplx = math.pow(2, norm_logprob)

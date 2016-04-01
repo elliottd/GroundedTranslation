@@ -1,6 +1,7 @@
 from __future__ import print_function
 
 import numpy as np
+np.set_printoptions(threshold='nan')
 import h5py
 import theano
 
@@ -72,12 +73,24 @@ class GroundedTranslationGenerator:
         else:
             self.hsn_size = 0
 
-        m = models.OneLayerLSTM(self.args.hidden_size, self.vocab_len,
-                                self.args.dropin,
-                                self.args.optimiser, self.args.l2reg,
-                                hsn_size=self.hsn_size,
-                                weights=self.args.checkpoint,
-                                gru=self.args.gru)
+        if self.args.mrnn:
+            m = models.MRNN(self.args.hidden_size, self.vocab_len,
+                           self.args.dropin,
+                           self.args.optimiser, self.args.l2reg,
+                           hsn_size=self.hsn_size,
+                           weights=self.args.checkpoint,
+                           gru=self.args.gru,
+                           clipnorm=self.args.clipnorm,
+                           t=self.data_gen.max_seq_len)
+        else:
+            m = models.NIC(self.args.hidden_size, self.vocab_len,
+                           self.args.dropin,
+                           self.args.optimiser, self.args.l2reg,
+                           hsn_size=self.hsn_size,
+                           weights=self.args.checkpoint,
+                           gru=self.args.gru,
+                           clipnorm=self.args.clipnorm,
+                           t=self.data_gen.max_seq_len)
 
         self.model = m.buildKerasModel(use_sourcelang=self.use_sourcelang,
                                        use_image=self.use_image)
@@ -97,6 +110,8 @@ class GroundedTranslationGenerator:
         on source language hidden representations, if provided by the
         --source_vectors parameter.
         The output is clipped to the first EOS generated, if it exists.
+
+        WARNING: beam search is currently broken on this branch.
 
         TODO: duplicated method with generate.py
         """
@@ -121,9 +136,9 @@ class GroundedTranslationGenerator:
         for t in range(start_gen):  # minimum 1
             for i in range(N_sents):
                 w = np.argmax(arrays[0][i, t])
+                complete_sentences[i].append(self.index2word[w])
 
         logger.debug(complete_sentences[0])
-        logger.debug(self.index2word[np.argmax(arrays[0][0])])
 
         if self.args.beam_width > 1:
             # we are going to beam search for the most probably sentence.
@@ -243,14 +258,13 @@ class GroundedTranslationGenerator:
         else:
             # We are going to arg max decode a sequence.
             for t in range(start_gen, self.args.generation_timesteps):
-                # we take a view of the datastructures, which means we're only
-                # ever generating a prediction for the next word. This saves a
-                # lot of cycles.
-                preds = self.model.predict([arr[:, 0:t] for arr in arrays],
-                                           verbose=0)
+                logger.debug("Input token: %s" % self.index2word[np.argmax(arrays[0][0,t-1])])
+                preds = self.model.predict({'text': arrays[0],
+                                            'img':  arrays[1]}, verbose=0)
 
                 # Look at the last indices for the words.
-                next_word_indices = np.argmax(preds[:, -1], axis=1)
+                next_word_indices = np.argmax(preds['output'][:, t-1], axis=1)
+                logger.debug("Predicted token: %s" % self.index2word[next_word_indices[0]])
                 # update array[0]/sentence-so-far with generated words.
                 for i in range(N_sents):
                     arrays[0][i, t, next_word_indices[i]] = 1.
@@ -260,9 +274,10 @@ class GroundedTranslationGenerator:
 
             # serialise each sentence until it hits the first end-of-string token
             for s in complete_sentences:
-                handle.write(' '.join([x for x
-                                       in itertools.takewhile(
-                                           lambda n: n != "<E>", s)]) + "\n")
+                decoded_str = ' '.join([x for x
+                                        in itertools.takewhile(
+                                            lambda n: n != "<E>", s[1:])])
+                handle.write(decoded_str + "\n")
 
         handle.close()
 
@@ -351,7 +366,8 @@ class GroundedTranslationGenerator:
         if self.args.debug:
             tic = time.time()
 
-        preds = self.model.predict(input_data, verbose=0)
+        preds = self.model.predict({'text': input_data[0],
+                                    'img': input_data[1]}, verbose=0)
 
         if self.args.debug:
             logger.info("Forward pass took %f", time.time()-tic)
@@ -360,8 +376,7 @@ class GroundedTranslationGenerator:
             for i in range(Y_target.shape[0]):
                 target_idx = np.argmax(Y_target[i, t])
                 if self.index2word[target_idx] != "<P>":
-                    log_p = math.log(preds[i, t, target_idx],2)
-                    #logprobs.append(log_p)
+                    log_p = math.log(preds['output'][i, t, target_idx],2)
                     sum_logprobs += -log_p
                     y_len += 1
 
@@ -474,6 +489,11 @@ if __name__ == "__main__":
                         help="Don't calculate BLEU or perplexity. Useful if\
                         you only want to see the generated sentences.")
     parser.add_argument("--beam_width", type=int, default=1)
+
+    parser.add_argument("--mrnn", action="store_true", 
+                        help="Use a Mao-style multimodal recurrent neural\
+                        network?")
+    parser.add_argument("--clipnorm", default=0.1)
 
     w = GroundedTranslationGenerator(parser.parse_args())
     w.generationModel()
