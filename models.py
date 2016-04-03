@@ -95,7 +95,7 @@ class OneLayerLSTM:
         model.add(TimeDistributedDense(output_dim=self.vocab_size,
                                        input_dim=self.hidden_size,
                                        W_regularizer=l2(self.l2reg)))
-        model.add(Activation('time_distributed_softmax'))
+        model.add(Activation('softmax'))
 
         if self.optimiser == 'adam':
             # allow user-defined hyper-parameters for ADAM because it is
