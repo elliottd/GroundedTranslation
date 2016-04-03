@@ -365,8 +365,12 @@ class VisualWordDataGenerator(object):
                     arrays[1][d_idx, 0, :] = self.get_source_features(split, data_key)
                 if use_image:
                     # img_idx can be 1 or 2, depending on use_sourcelang
-                    arrays[img_idx][d_idx, 0, :] = self.get_image_features(
-                        self.dataset, split, data_key)
+                    if self.args_dict.mrnn:
+                        arrays[img_idx][d_idx, :, :] = self.get_image_features(
+                            self.dataset, split, data_key)
+                    else:
+                        arrays[img_idx][d_idx, 0, :] = self.get_image_features(
+                            self.dataset, split, data_key)
                 d_idx += 1
             if d_idx >= intended_size:
                 break
@@ -437,8 +441,12 @@ class VisualWordDataGenerator(object):
                     arrays[1][d_idx, 0, :] = self.get_source_features(split, data_key)
                 if use_image:
                     # img_idx can be 1 or 2, depending on use_sourcelang
-                    arrays[img_idx][d_idx, 0, :] = self.get_image_features(
-                        self.dataset, split, data_key)
+                    if self.args_dict.mrnn:
+                        arrays[img_idx][d_idx, :, :] = self.get_image_features(
+                            self.dataset, split, data_key)
+                    else:
+                        arrays[img_idx][d_idx, 0, :] = self.get_image_features(
+                            self.dataset, split, data_key)
                 d_idx += 1
             if d_idx >= intended_size:
                 break

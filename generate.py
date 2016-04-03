@@ -353,32 +353,39 @@ class GroundedTranslationGenerator:
 
         return duplicated
 
-    def calculate_pplx(self, directory, val=True):
-        """ Without batching. Robust against multiple descriptions/image,
-        since it uses data_generator.get_data_by_split input. """
+    def calculate_pplx(self, val=True):
+        """ Splits the input data into batches of self.args.batch_size to
+        reduce the memory footprint of holding all of the data in RAM. """
+
         prefix = "val" if val else "test"
         logger.info("Calculating pplx over %s data", prefix)
         sum_logprobs = 0
         y_len = 0
-        input_data, Y_target = self.data_gen.get_data_by_split(prefix,
-                                  self.use_sourcelang, self.use_image)
 
-        if self.args.debug:
-            tic = time.time()
+        val_generator = self.data_gen.valGenerator()
+        seen = 0
+        for data in val_generator:
+            text = data['text']
+            img = data['img']
+            Y_target = data['output']
 
-        preds = self.model.predict({'text': input_data[0],
-                                    'img': input_data[1]}, verbose=0)
+            preds = self.model.predict({'text': text, 'img': img},
+                                       verbose=0,
+                                       batch_size=self.args.batch_size)
 
-        if self.args.debug:
-            logger.info("Forward pass took %f", time.time()-tic)
-
-        for t in range(Y_target.shape[1]):
             for i in range(Y_target.shape[0]):
-                target_idx = np.argmax(Y_target[i, t])
-                if self.index2word[target_idx] != "<P>":
-                    log_p = math.log(preds['output'][i, t, target_idx],2)
-                    sum_logprobs += -log_p
-                    y_len += 1
+                for t in range(Y_target.shape[1]):
+                    target_idx = np.argmax(Y_target[i, t])
+                    target_tok = self.index2word[target_idx]
+                    if target_tok != "<P>":
+                        log_p = math.log(preds['output'][i, t, target_idx],2)
+                        sum_logprobs += -log_p
+                        y_len += 1
+
+            seen += text.shape[0]
+            if seen == self.data_gen.split_sizes['val']:
+                # Hacky way to break out of the generator
+                break
 
         norm_logprob = sum_logprobs / y_len
         pplx = math.pow(2, norm_logprob)

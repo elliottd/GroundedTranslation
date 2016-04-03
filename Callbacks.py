@@ -304,13 +304,9 @@ class CompilationOfCallbacks(Callback):
     def make_generation_arrays(self, prefix, fixed_words, generation=False):
         """Create arrays that are used as input for generation. """
 
-        if prefix == 'val':
-            # Don't duplicate resources if we can avoid it
-            input_data = self.data_generator._cached_val_input
-        else:
-            input_data =\
-                self.data_generator.get_generation_data_by_split(prefix,
-                                    self.use_sourcelang, self.use_image)
+        input_data =\
+            self.data_generator.get_generation_data_by_split(prefix,
+                                self.use_sourcelang, self.use_image)
 
         # Replace input words (input_data[0]) with zeros for generation,
         # except for the first args.generate_from_N_words
@@ -390,7 +386,7 @@ class CompilationOfCallbacks(Callback):
 
         handle.close()
 
-    def calculate_pplx(self, path, val=True):
+    def calculate_pplx_old(self, path, val=True):
         """ Without batching. Robust against multiple descriptions/image,
         since it uses data_generator.get_data_by_split input. 
         We ignore OOV tokens, in line with other toolkits. See (D1) e.g.
@@ -429,3 +425,41 @@ class CompilationOfCallbacks(Callback):
         logger.info("PPLX: %.4f", pplx)
         return pplx
 
+    def calculate_pplx(self, val=True):
+        """ Splits the input data into batches of self.args.batch_size to
+        reduce the memory footprint of holding all of the data in RAM. """
+
+        prefix = "val" if val else "test"
+        logger.info("Calculating pplx over %s data", prefix)
+        sum_logprobs = 0
+        y_len = 0
+
+        val_generator = self.data_generator.valGenerator()
+        seen = 0
+        for data in val_generator:
+            text = data['text']
+            img = data['img']
+            Y_target = data['output']
+
+            preds = self.model.predict({'text': text, 'img': img},
+                                       verbose=0,
+                                       batch_size=self.args.batch_size)
+
+            for i in range(Y_target.shape[0]):
+                for t in range(Y_target.shape[1]):
+                    target_idx = np.argmax(Y_target[i, t])
+                    target_tok = self.index2word[target_idx]
+                    if target_tok != "<P>":
+                        log_p = math.log(preds['output'][i, t, target_idx],2)
+                        sum_logprobs += -log_p
+                        y_len += 1
+
+            seen += text.shape[0]
+            if seen == self.data_generator.split_sizes['val']:
+                # Hacky way to break out of the generator
+                break
+
+        norm_logprob = sum_logprobs / y_len
+        pplx = math.pow(2, norm_logprob)
+        logger.info("PPLX: %.4f", pplx)
+        return pplx
