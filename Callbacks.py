@@ -78,8 +78,6 @@ class CompilationOfCallbacks(Callback):
         if self.args.source_vectors is not None:
             self.source_dataset = h5py.File("%s/dataset.h5" % self.args.source_vectors, "r")
 
-        subprocess.check_call(["touch checkpoints/%s/val_losses" % self.args.run_string], shell=True)
-
     def on_epoch_end(self, epoch, logs={}):
         '''
         At the end of each epoch we
@@ -319,6 +317,13 @@ class CompilationOfCallbacks(Callback):
 
         return gen_input_data
 
+    def reset_text_arrays(self, text_arrays, fixed_words=1):
+        """ Reset the values in the text data structure to zero so we cannot
+        accidentally pass them into the model """
+        reset_arrays = deepcopy(text_arrays)
+        reset_arrays[:,fixed_words:, :] = 0
+        return reset_arrays
+
     def generate_sentences(self, filepath, val=True):
         """
         Generates descriptions of images for --generation_timesteps
@@ -330,60 +335,57 @@ class CompilationOfCallbacks(Callback):
         --source_vectors parameter.
         The output is clipped to the first EOS generated, if it exists.
 
-        TODO: beam search
         TODO: duplicated method with generate.py
         """
         prefix = "val" if val else "test"
-        handle = codecs.open("%s/%sGenerated" % (filepath, prefix), "w",
-                             'utf-8')
         logger.info("Generating %s descriptions", prefix)
+        start_gen = self.args.generate_from_N_words + 1  # include BOS
+        handle = codecs.open("%s/%sGenerated" % (filepath, prefix), 
+                             "w", 'utf-8')
 
-        start_gen = self.args.generate_from_N_words  # Default 0
-        start_gen = start_gen + 1  # include BOS
+        val_generator = self.data_generator.generation_generator(prefix)
+        seen = 0
+        for data in val_generator:
+            text = data['text']
+            # Append the first start_gen words to the complete_sentences list
+            # for each instance in the batch.
+            complete_sentences = [[] for _ in range(text.shape[0])]
+            for t in range(start_gen):  # minimum 1
+                for i in range(text.shape[0]):
+                    w = np.argmax(text[i, t])
+                    complete_sentences[i].append(self.index2word[w])
+            text = self.reset_text_arrays(text, start_gen)
+            img = data['img']
+            Y_target = data['output']
 
-        # prepare the datastructures for generation (no batching over val)
-        arrays = self.make_generation_arrays(prefix, start_gen,
-                                             self.args.use_predicted_tokens)
-        N_sents = arrays[0].shape[0]
+            for t in range(start_gen, self.args.generation_timesteps):
+                logger.debug("Input token: %s" % self.index2word[np.argmax(text[0,t-1])])
+                preds = self.model.predict({'text': text,
+                                            'img':  img},
+                                            verbose=0)
 
-        # complete_sentences = [["<S>"] for _ in range(N_sents)]
+                # Look at the last indices for the words.
+                next_word_indices = np.argmax(preds['output'][:, t-1], axis=1)
+                logger.debug("Predicted token: %s" % self.index2word[next_word_indices[0]])
+                # update array[0]/sentence-so-far with generated words.
+                for i in range(len(next_word_indices)):
+                    text[i, t, next_word_indices[i]] = 1.
+                next_words = [self.index2word[x] for x in next_word_indices]
+                for i in range(len(next_words)):
+                    complete_sentences[i].append(next_words[i])
 
-        complete_sentences = [[] for _ in range(N_sents)]
-        for t in range(start_gen):  # minimum 1
-            for i in range(N_sents):
-                w = np.argmax(arrays[0][i, t])
-                complete_sentences[i].append(self.index2word[w])
+            sys.stdout.flush()
+            # print/extract each sentence until it hits the first end-of-string token
+            for s in complete_sentences:
+                decoded_str = ' '.join([x for x
+                                        in itertools.takewhile(
+                                            lambda n: n != "<E>", s[1:])])
+                handle.write(decoded_str + "\n")
 
-        logger.debug("Sentence 0 %s", complete_sentences[0])
-        logger.debug("Sentence 9 %s", complete_sentences[9])
-
-        logger.debug('t=start-1, %s', np.argmax(arrays[0][0, start_gen-1,:]))
-        logger.debug('t=start, %s', np.argmax(arrays[0][0, start_gen,:]))
-        logger.debug('t=start+1, %s', np.argmax(arrays[0][0, start_gen+1,:]))
-
-        for t in range(start_gen, self.args.generation_timesteps):
-            logger.debug("Input token: %s" % self.index2word[np.argmax(arrays[0][0,t-1])])
-            preds = self.model.predict({'text': arrays[0],
-                                        'img':  arrays[1]}, verbose=0)
-
-            # Look at the last indices for the words.
-            next_word_indices = np.argmax(preds['output'][:, t-1], axis=1)
-            logger.debug("Predicted token: %s" % self.index2word[next_word_indices[0]])
-            # update array[0]/sentence-so-far with generated words.
-            for i in range(N_sents):
-                arrays[0][i, t, next_word_indices[i]] = 1.
-            next_words = [self.index2word[x] for x in next_word_indices]
-            for i in range(len(next_words)):
-                complete_sentences[i].append(next_words[i])
-
-        sys.stdout.flush()
-        # print/extract each sentence until it hits the first end-of-string token
-        for s in complete_sentences:
-            decoded_str = ' '.join([x for x
-                                    in itertools.takewhile(
-                                        lambda n: n != "<E>", s[1:])])
-            handle.write(decoded_str + "\n")
-
+            seen += text.shape[0]
+            if seen == self.data_generator.split_sizes['val']:
+                # Hacky way to break out of the generator
+                break
         handle.close()
 
     def calculate_pplx_old(self, path, val=True):
@@ -434,7 +436,7 @@ class CompilationOfCallbacks(Callback):
         sum_logprobs = 0
         y_len = 0
 
-        val_generator = self.data_generator.valGenerator()
+        val_generator = self.data_generator.fixed_generator(prefix)
         seen = 0
         for data in val_generator:
             text = data['text']

@@ -115,32 +115,32 @@ class GroundedTranslationGenerator:
 
         TODO: duplicated method with generate.py
         """
-        prefix = "val" if val else "test"
-        handle = codecs.open("%s/%sGenerated" % (filepath, prefix), "w",
-                             'utf-8')
-        logger.info("Generating %s descriptions", prefix)
-
-        start_gen = self.args.generate_from_N_words  # Default 0
-        start_gen = start_gen + 1  # include BOS
-
-        # prepare the datastructures for generation (no batching over val)
-        arrays = self.make_generation_arrays(prefix, start_gen,
-                 generation=self.args.use_predicted_tokens)
-        N_sents = arrays[0].shape[0]
-        logger.debug("Input arrays %d", len(arrays))
-        logger.debug("Instances %d", len(arrays[0]))
-
-        # complete_sentences = [["<S>"] for _ in range(N_sents)]
-
-        complete_sentences = [[] for _ in range(N_sents)]
-        for t in range(start_gen):  # minimum 1
-            for i in range(N_sents):
-                w = np.argmax(arrays[0][i, t])
-                complete_sentences[i].append(self.index2word[w])
-
-        logger.debug(complete_sentences[0])
-
         if self.args.beam_width > 1:
+            prefix = "val" if val else "test"
+            handle = codecs.open("%s/%sGenerated" % (filepath, prefix), "w",
+                                 'utf-8')
+            logger.info("Generating %s descriptions", prefix)
+
+            start_gen = self.args.generate_from_N_words  # Default 0
+            start_gen = start_gen + 1  # include BOS
+
+            # prepare the datastructures for generation (no batching over val)
+            arrays = self.make_generation_arrays(prefix, start_gen,
+                     generation=self.args.use_predicted_tokens)
+            N_sents = arrays[0].shape[0]
+            logger.debug("Input arrays %d", len(arrays))
+            logger.debug("Instances %d", len(arrays[0]))
+
+            # complete_sentences = [["<S>"] for _ in range(N_sents)]
+
+            complete_sentences = [[] for _ in range(N_sents)]
+            for t in range(start_gen):  # minimum 1
+                for i in range(N_sents):
+                    w = np.argmax(arrays[0][i, t])
+                    complete_sentences[i].append(self.index2word[w])
+
+            logger.debug(complete_sentences[0])
+
             # we are going to beam search for the most probably sentence.
             # let's do this one sentence at a time to make the logging output
             # easier to understand
@@ -257,29 +257,63 @@ class GroundedTranslationGenerator:
                                           lambda n: n != "<E>", complete_sentences[i])]))
         else:
             # We are going to arg max decode a sequence.
-            for t in range(start_gen, self.args.generation_timesteps):
-                logger.debug("Input token: %s" % self.index2word[np.argmax(arrays[0][0,t-1])])
-                preds = self.model.predict({'text': arrays[0],
-                                            'img':  arrays[1]}, verbose=0)
+            prefix = "val" if val else "test"
+            logger.info("Generating %s descriptions", prefix)
+            start_gen = self.args.generate_from_N_words + 1  # include BOS
+            handle = codecs.open("%s/%sGenerated" % (filepath, prefix), 
+                                 "w", 'utf-8')
 
-                # Look at the last indices for the words.
-                next_word_indices = np.argmax(preds['output'][:, t-1], axis=1)
-                logger.debug("Predicted token: %s" % self.index2word[next_word_indices[0]])
-                # update array[0]/sentence-so-far with generated words.
-                for i in range(N_sents):
-                    arrays[0][i, t, next_word_indices[i]] = 1.
-                next_words = [self.index2word[x] for x in next_word_indices]
-                for i in range(len(next_words)):
-                    complete_sentences[i].append(next_words[i])
+            val_generator = self.data_gen.generation_generator(split)
+            seen = 0
+            for data in val_generator:
+                text = data['text']
+                # Append the first start_gen words to the complete_sentences list
+                # for each instance in the batch.
+                complete_sentences = [[] for _ in range(text.shape[0])]
+                for t in range(start_gen):  # minimum 1
+                    for i in range(text.shape[0]):
+                        w = np.argmax(text[i, t])
+                        complete_sentences[i].append(self.index2word[w])
+                text = self.reset_text_arrays(text, start_gen)
+                img = data['img']
+                Y_target = data['output']
 
-            # serialise each sentence until it hits the first end-of-string token
-            for s in complete_sentences:
-                decoded_str = ' '.join([x for x
-                                        in itertools.takewhile(
-                                            lambda n: n != "<E>", s[1:])])
-                handle.write(decoded_str + "\n")
+                for t in range(start_gen, self.args.generation_timesteps):
+                    logger.debug("Input token: %s" % self.index2word[np.argmax(text[0,t-1])])
+                    preds = self.model.predict({'text': text,
+                                                'img':  img}, 
+                                                verbose=0)
 
-        handle.close()
+                    # Look at the last indices for the words.
+                    next_word_indices = np.argmax(preds['output'][:, t-1], axis=1)
+                    logger.debug("Predicted token: %s" % self.index2word[next_word_indices[0]])
+                    # update array[0]/sentence-so-far with generated words.
+                    for i in range(len(next_word_indices)):
+                        text[i, t, next_word_indices[i]] = 1.
+                    next_words = [self.index2word[x] for x in next_word_indices]
+                    for i in range(len(next_words)):
+                        complete_sentences[i].append(next_words[i])
+
+                sys.stdout.flush()
+                # print/extract each sentence until it hits the first end-of-string token
+                for s in complete_sentences:
+                    decoded_str = ' '.join([x for x
+                                            in itertools.takewhile(
+                                                lambda n: n != "<E>", s[1:])])
+                    handle.write(decoded_str + "\n")
+
+                seen += text.shape[0]
+                if seen == self.data_gen.split_sizes['val']:
+                    # Hacky way to break out of the generator
+                    break
+            handle.close()
+
+    def reset_text_arrays(self, text_arrays, fixed_words=1):
+        """ Reset the values in the text data structure to zero so we cannot
+        accidentally pass them into the model """
+        reset_arrays = deepcopy(text_arrays)
+        reset_arrays[:,fixed_words:, :] = 0
+        return reset_arrays
 
     def find_best_checkpoint(self):
         '''
@@ -353,7 +387,7 @@ class GroundedTranslationGenerator:
 
         return duplicated
 
-    def calculate_pplx(self, val=True):
+    def calculate_pplx(self, path, val=True):
         """ Splits the input data into batches of self.args.batch_size to
         reduce the memory footprint of holding all of the data in RAM. """
 
@@ -362,7 +396,7 @@ class GroundedTranslationGenerator:
         sum_logprobs = 0
         y_len = 0
 
-        val_generator = self.data_gen.valGenerator()
+        val_generator = self.data_gen.fixed_generator(split)
         seen = 0
         for data in val_generator:
             text = data['text']
@@ -390,7 +424,7 @@ class GroundedTranslationGenerator:
         norm_logprob = sum_logprobs / y_len
         pplx = math.pow(2, norm_logprob)
         logger.info("PPLX: %.4f", pplx)
-        handle = open("%s/%sPPLX" % (directory, prefix), "w")
+        handle = open("%s/%sPPLX" % (path, prefix), "w")
         handle.write("%f\n" % pplx)
         handle.close()
         return pplx

@@ -97,9 +97,9 @@ class VisualWordLSTM(object):
                                            use_sourcelang=self.use_sourcelang,
                                            use_image=self.use_image)
 
-        train_generator = self.data_generator.generator_for_split('val')
-        train_size = self.data_generator.split_sizes['val']
-        val_generator = self.data_generator.valGenerator()
+        train_generator = self.data_generator.random_generator('train')
+        train_size = self.data_generator.split_sizes['train']
+        val_generator = self.data_generator.fixed_generator('val')
         val_size = self.data_generator.split_sizes['val']
 
         model.fit_generator(generator=train_generator,
