@@ -930,11 +930,18 @@ class VisualWordDataGenerator(object):
 #                                          self.args_dict.source_vectors is not None,
 #                                                  not self.args_dict.no_image)
 
-    def generation_generator(self, split='val'):
+    def generation_generator(self, split='val', batch_size=-1):
         """Generator for generating descriptions.
         This will only return one array per instance in the data.
-        No randomization."""
-        arrays = self.get_new_training_arrays(self.args_dict.batch_size, 
+        No randomization.
+
+        batch_size=1 will return minibatches of one instance. Use this for
+        beam search decoding.
+        """
+
+        batch_size = self.args_dict.batch_size if batch_size == -1 else batch_size
+
+        arrays = self.get_new_training_arrays(batch_size,
                                               self.args_dict.source_vectors is not None,
                                               not self.args_dict.no_image)
         i = 0
@@ -942,8 +949,8 @@ class VisualWordDataGenerator(object):
         identifiers = self.dataset[split].keys()
 
         for ident in identifiers:
-           description = self.dataset['val'][ident]['descriptions'][0]
-           img_feats = self.get_image_features(self.dataset, 'val', ident)
+           description = self.dataset[split][ident]['descriptions'][0]
+           img_feats = self.get_image_features(self.dataset, split, ident)
            try:
                description_array = self.format_sequence(description.split())
                arrays[0][i] = description_array
@@ -955,7 +962,7 @@ class VisualWordDataGenerator(object):
            except AssertionError:
                # If the description doesn't share any words with the vocabulary.
                pass
-           if i == self.args_dict.batch_size:
+           if i == batch_size:
                targets = self.get_target_descriptions(arrays[0])
                logger.debug(arrays[0].shape)
                logger.debug(' '.join([self.index2word[np.argmax(x)] for x
@@ -964,9 +971,9 @@ class VisualWordDataGenerator(object):
                yield {'text':arrays[0], 'img': arrays[1],
                       'output': targets}
                i = 0
-               arrays = self.get_new_training_arrays(self.args_dict.batch_size, 
-                                     self.args_dict.source_vectors is not None,
-                                             not self.args_dict.no_image)
+               arrays = self.get_new_training_arrays(batch_size,
+                                                     self.args_dict.source_vectors is not None,
+                                                     not self.args_dict.no_image)
         if i != 0:
             logger.debug("Outside for loop")
             self.resize_arrays(i, arrays)
@@ -976,6 +983,6 @@ class VisualWordDataGenerator(object):
             yield {'text':arrays[0], 'img': arrays[1],
                     'output': targets}
             i = 0
-            arrays = self.get_new_training_arrays(self.args_dict.batch_size, 
-                                    self.args_dict.source_vectors is not None,
-                                not self.args_dict.no_image)
+            arrays = self.get_new_training_arrays(batch_size,
+                                                  self.args_dict.source_vectors is not None,
+                                                  not self.args_dict.no_image)

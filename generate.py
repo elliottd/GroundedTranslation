@@ -115,6 +115,7 @@ class GroundedTranslationGenerator:
 
         TODO: duplicated method with generate.py
         """
+
         if self.args.beam_width > 1:
             prefix = "val" if val else "test"
             handle = codecs.open("%s/%sGenerated" % (filepath, prefix), "w",
@@ -124,31 +125,29 @@ class GroundedTranslationGenerator:
             start_gen = self.args.generate_from_N_words  # Default 0
             start_gen = start_gen + 1  # include BOS
 
-            # prepare the datastructures for generation (no batching over val)
-            arrays = self.make_generation_arrays(prefix, start_gen,
-                     generation=self.args.use_predicted_tokens)
-            N_sents = arrays[0].shape[0]
-            logger.debug("Input arrays %d", len(arrays))
-            logger.debug("Instances %d", len(arrays[0]))
-
-            # complete_sentences = [["<S>"] for _ in range(N_sents)]
-
-            complete_sentences = [[] for _ in range(N_sents)]
-            for t in range(start_gen):  # minimum 1
-                for i in range(N_sents):
-                    w = np.argmax(arrays[0][i, t])
-                    complete_sentences[i].append(self.index2word[w])
-
-            logger.debug(complete_sentences[0])
-
+            val_generator = self.data_gen.generation_generator(prefix, batch_size=1)
+            seen = 0
             # we are going to beam search for the most probably sentence.
             # let's do this one sentence at a time to make the logging output
             # easier to understand
-            for i in range(N_sents):
+            for data in val_generator:
+                text = data['text']
+                # Append the first start_gen words to the complete_sentences list
+                # for each instance in the batch.
+                complete_sentences = [[] for _ in range(text.shape[0])]
+                for t in range(start_gen):  # minimum 1
+                    for i in range(text.shape[0]):
+                        w = np.argmax(text[i, t])
+                        complete_sentences[i].append(self.index2word[w])
+                text = self.reset_text_arrays(text, start_gen)
+                img = data['img']
+
                 max_beam_width = self.args.beam_width
-                structs = self.make_duplicate_matrices(arrays[0][i],
-                                                       arrays[1][i], 
+                structs = self.make_duplicate_matrices(text,
+                                                       img, 
                                                        max_beam_width)
+                text = structs[0]
+                img = structs[1]
                 # A beam is a 2-tuple with the probability of the sequence and
                 # the words in that sequence. Start with empty beams
                 beams = [(0.0, [])]
@@ -163,11 +162,12 @@ class GroundedTranslationGenerator:
                     # we take a view of the datastructures, which means we're only
                     # ever generating a prediction for the next word. This saves a
                     # lot of cycles.
-                    preds = self.model.predict([arr[:, 0:t] for arr in structs],
+                    preds = self.model.predict({'text': structs[0],
+                                                'img':  structs[1]}, 
                                                 verbose=0)
 
                     # The last indices in preds are the predicted words
-                    next_word_indices = preds[:, -1]
+                    next_word_indices = preds['output'][:, t-1]
                     sorted_indices = np.argsort(-next_word_indices, axis=1)
 
                     # Each instance in structs is holding the history of a
@@ -187,10 +187,11 @@ class GroundedTranslationGenerator:
                             candidates.append([b[0] + math.log(wordProb), b[1] + [wordIndex]])
 
                     candidates.sort(reverse = True)
-                    logger.info("Candidates in the beam")
-                    logger.info("---")
-                    for c in candidates:
-                        logger.info(" ".join([self.index2word[x] for x in c[1]]) + " (%f)" % c[0])
+                    if self.args.verbose:
+                        logger.info("Candidates in the beam")
+                        logger.info("---")
+                        for c in candidates:
+                            logger.info(" ".join([self.index2word[x] for x in c[1]]) + " (%f)" % c[0])
 
                     beams = candidates[:max_beam_width] # prune the beams
                     for b in beams:
@@ -204,10 +205,11 @@ class GroundedTranslationGenerator:
                             if max_beam_width >= 1:
                                 max_beam_width -= 1
 
-                    logger.info("Pruned beams")
-                    logger.info("---")
-                    for b in beams:
-                        logger.info(" ".join([self.index2word[x] for x in b[1]]) + "(%f)" % b[0])
+                    if self.args.verbose:
+                        logger.info("Pruned beams")
+                        logger.info("---")
+                        for b in beams:
+                            logger.info(" ".join([self.index2word[x] for x in b[1]]) + "(%f)" % b[0])
 
                     if max_beam_width == 0:
                         # We have sampled max_beam_width sequences with an <E>
@@ -216,9 +218,9 @@ class GroundedTranslationGenerator:
 
                     # Reproduce the structs for the beam search so we can keep
                     # track of the state of each beam
-                    structs = self.make_duplicate_matrices(arrays[0][i],
-                                                        arrays[1][i],
-                                                        max_beam_width)
+                    structs = self.make_duplicate_matrices(text,
+                                                           img,
+                                                           max_beam_width)
 
                     # Rewrite the 1-hot word features with the
                     # so-far-predcicted tokens in a beam.
@@ -239,10 +241,11 @@ class GroundedTranslationGenerator:
                     f[0] = f[0] / len(f[1])
                 finished.sort(reverse=True)
 
-                logger.info("Length-normalised samples")
-                logger.info("---")
-                for f in finished:
-                    logger.info(" ".join([self.index2word[x] for x in f[1]]) + "(%f)" % f[0])
+                if self.args.verbose:
+                    logger.info("Length-normalised samples")
+                    logger.info("---")
+                    for f in finished:
+                        logger.info(" ".join([self.index2word[x] for x in f[1]]) + "(%f)" % f[0])
 
                 # Emit the lowest (log) probability sequence
                 best_beam = finished[0]
@@ -250,11 +253,17 @@ class GroundedTranslationGenerator:
                 handle.write(' '.join([x for x
                                        in itertools.takewhile(
                                            lambda n: n != "<E>", complete_sentences[i])]) + "\n")
-                logger.info("Max-prob sentence")
-                logger.info("---")
-                logger.info(' '.join([x for x
+                logger.info("%s (%f)",' '.join([x for x
                                       in itertools.takewhile(
-                                          lambda n: n != "<E>", complete_sentences[i])]))
+                                          lambda n: n != "<E>",
+                                          complete_sentences[i])]),
+                                      best_beam[0])
+
+                seen += text.shape[0]
+                if seen == self.data_gen.split_sizes['val']:
+                    # Hacky way to break out of the generator
+                    break
+            handle.close()
         else:
             # We are going to arg max decode a sequence.
             prefix = "val" if val else "test"
@@ -374,12 +383,13 @@ class GroundedTranslationGenerator:
         Prepare K duplicates of the input data for an image.
         Useful for beam search decoding.
         '''
+
         duplicated = [[],[]]
         for x in range(k):
             # Make a deep copy of the word_feats structures 
             # so the arrays will never be shared
-            duplicated[0].append(deepcopy(word_feats))
-            duplicated[1].append(img_feats)
+            duplicated[0].append(deepcopy(word_feats[0,:,:]))
+            duplicated[1].append(img_feats[0,:,:])
 
         # Turn the list of arrays into a numpy array
         duplicated[0] = np.array(duplicated[0])
@@ -535,6 +545,9 @@ if __name__ == "__main__":
                         help="Use a Mao-style multimodal recurrent neural\
                         network?")
     parser.add_argument("--clipnorm", default=0.1)
+
+    parser.add_argument("--verbose", action="store_true",
+                        help="Verbose output while decoding? (Default = False")
 
     w = GroundedTranslationGenerator(parser.parse_args())
     w.generationModel()
