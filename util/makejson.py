@@ -2,6 +2,7 @@ import os
 import glob
 import re
 import argparse
+import string
 
 parser = argparse.ArgumentParser("Convert text files into JSON")
 parser.add_argument("--path", type=str, help="Path to the input\
@@ -19,7 +20,7 @@ handle.write('{"images":[')
 sent_counter = 0
 imgid = 0
 
-splits = ['train', 'val', 'test']
+splits = ['train', 'val']#, 'test']
 
 for split in splits:
   sentence_files = glob.glob("%s/%s.*" % (args.path, split))
@@ -27,6 +28,7 @@ for split in splits:
   for fname in sentence_files:
       f_sentences = open("%s" % (fname)).readlines()
       f_sentences = [x.replace("\n","") for x in f_sentences]
+      f_sentences = [x.lower() for x in f_sentences]
       sentences.append(f_sentences)
 
   images = open("%s/%s_images" % (args.path, split)).readlines()
@@ -52,15 +54,18 @@ for split in splits:
     handle.write('"sentences":[')
 
     for sidx, s in enumerate(local_sentences):
-        split_sent = s.split(" ")
+        # BE CAREFUL, WE ARE THROWING AWAY SPEECH MARKS
+        s_tokenised = s.lower().replace('"','').translate(None, string.punctuation).strip()
+        split_sent = s_tokenised.split()
         tokens_str = ''
         for w in split_sent:
+          w = w.replace('"','')
+          w = w.replace('.','')
           tokens_str += '"%s", ' % w.replace('"','')
         tokens_str = tokens_str[:-2]
 
         handle.write('{"tokens":[%s], ' % tokens_str)
-        s = s.replace('"', '') # BE CAREFUL, WE ARE THROWING AWAY SPEECH MARKS
-        handle.write('"raw":"%s", ' % s)
+        handle.write('"raw":"%s", ' % s_tokenised)
         handle.write('"imgid":%d, ' % imgid)
         handle.write('"sentid": %d} ' % sent_counter)
         if sidx < len(local_sentences)-1:
@@ -70,7 +75,8 @@ for split in splits:
     handle.write('"split":"%s", ' % split)
     handle.write('"sentids":[%s]}' % sent_ids)
 
-    if split == "test":
+    #if split == "test":
+    if split == "val":
       if localidx < len(images)-1:
         handle.write(", ")
       else:
