@@ -105,7 +105,7 @@ class VisualWordLSTM(object):
         model.fit_generator(generator=train_generator,
                             samples_per_epoch=train_size,
                             nb_epoch= self.args.max_epochs,
-                            verbose=1,
+                            verbose=2,
                             callbacks=[callbacks],
                             nb_worker=1,
                             validation_data=val_generator,
