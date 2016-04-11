@@ -10,31 +10,36 @@ import shutil
 import logging
 import sys
 
-from memory_profiler import profile
-
 # Set up logger
 logging.basicConfig(level=logging.INFO, stream=sys.stdout)
 logger = logging.getLogger(__name__)
 
 class NIC:
 
-    def __init__(self, hidden_size, vocab_size, dropin, optimiser,
+    def __init__(self, embed_size, hidden_size, vocab_size, dropin, optimiser,
                  l2reg, hsn_size=512, weights=None, gru=False,
-                 clipnorm=-1, batch_size=None, t=None):
-        self.hidden_size = hidden_size  # number of units in first LSTM
-        self.dropin = dropin  # prob. of dropping input units
+                 clipnorm=-1, batch_size=None, t=None, lr=0.001):
+
+        self.max_t = t  # Expected timesteps. Needed to build the Theano graph
+
+        # Model hyperparameters
         self.vocab_size = vocab_size  # size of word vocabulary
-        self.optimiser = optimiser  # optimisation method
-        self.l2reg = l2reg  # weight regularisation penalty
+        self.embed_size = embed_size  # number of units in a word embedding
         self.hsn_size = hsn_size  # size of the source hidden vector
-        self.weights = weights  # initialise with checkpointed weights?
-        self.beta1 = None
-        self.beta2 = None
-        self.epsilon = None
-        self.lr = None
-        self.clipnorm = clipnorm
-        self.max_t = t
+        self.hidden_size = hidden_size  # number of units in first LSTM
         self.gru = gru  # gru recurrent layer? (false = lstm)
+        self.dropin = dropin  # prob. of dropping input units
+        self.l2reg = l2reg  # weight regularisation penalty
+
+        # Optimiser hyperparameters
+        self.optimiser = optimiser  # optimisation method
+        self.lr = lr
+        self.beta1 = 0.9
+        self.beta2 = 0.999
+        self.epsilon = 1e-8
+        self.clipnorm = clipnorm
+
+        self.weights = weights  # initialise with checkpointed weights?
 
     def buildKerasModel(self, use_sourcelang=False, use_image=True):
         '''
@@ -47,45 +52,83 @@ class NIC:
         '''
         logger.info('Building Keras model...')
         logger.info('Using image features: %s', use_image)
-        logger.info('Using source language features: %s', use_sourcelang)
 
         model = Graph()
         model.add_input('text', input_shape=(self.max_t, self.vocab_size))
+
+        # Word embeddings
+        model.add_node(TimeDistributedDense(output_dim=self.embed_size,
+                                            input_dim=self.vocab_size,
+                                            W_regularizer=l2(self.l2reg)),
+                                            name="w_embed", input='text')
+        model.add_node(Dropout(self.dropin), 
+                       name="w_embed_drop",
+                       input="w_embed")
+
+        # Embed -> Hidden
         model.add_node(TimeDistributedDense(output_dim=self.hidden_size,
-                                      input_dim=self.vocab_size,
+                                      input_dim=self.embed_size,
                                       W_regularizer=l2(self.l2reg)),
-                                      name='w_embed', input='text')
-        model.add_node(Dropout(self.dropin), name='w_embed_drop', input='w_embed')
+                                      name='embed_to_hidden', input='w_embed')
 
-        model.add_input('img', input_shape=(self.max_t, 4096))
-        model.add_node(TimeDistributedDense(output_dim=self.hidden_size,
-                                            input_dim=4096,
-                                            W_regularizer=l2(self.l2reg)), name='i_embed', input='img')
-        model.add_node(Dropout(self.dropin), name='i_embed_drop', input='i_embed')
+        if use_image:
+            # Image 'embedding'
+            model.add_input('img', input_shape=(self.max_t, 4096))
+            model.add_node(TimeDistributedDense(output_dim=self.hidden_size,
+                                                input_dim=4096,
+                                                W_regularizer=l2(self.l2reg)), name='i_embed', input='img')
+            model.add_node(Dropout(self.dropin), name='i_embed_drop', input='i_embed')
 
-        model.add_node(LSTM(output_dim=self.hidden_size,
-                       input_dim=self.hidden_size,
-                       return_sequences=True), name='lstm',
-                       inputs=['w_embed_drop', 'i_embed_drop'],
-                       merge_mode='sum')
+
+        if use_sourcelang:
+            logger.info('Using source language features: %s', use_sourcelang)
+            model.add_input('source', input_shape=(self.max_t, self.hsn_size))
+            model.add_node(TimeDistributedDense(ouptut_dim=self.hidden_size,
+                                                input_dim=self.hsn_size,
+                                                W_regularizer=l2(self.l2reg)),
+                                                name="s_embed", input="source")
+            model.add_node(Dropout(self.dropin), 
+                           name="s_embed_drop",
+                           input="s_embed")
+
+        # Input nodes for the recurrent layer
+        if use_image and use_sourcelang:
+            recurrent_inputs = ['embed_to_hidden',
+                                'i_embed_drop',
+                                's_embed_drop']
+        elif use_image:
+            recurrent_inputs = ['embed_to_hidden', 'i_embed_drop']
+        elif use_sourcelang:
+            recurrent_inputs = ['embed_to_hidden', 's_embed_drop']
+
+        # Recurrent layer
+        if self.gru:
+            model.add_node(GRU(output_dim=self.hidden_size,
+                           input_dim=self.hidden_size,
+                           return_sequences=True), name='rnn',
+                           inputs=recurrent_inputs,
+                           merge_mode='sum')
+
+        else:
+            model.add_node(LSTM(output_dim=self.hidden_size,
+                           input_dim=self.hidden_size,
+                           return_sequences=True), name='rnn',
+                           inputs=recurrent_inputs,
+                           merge_mode='sum')
 
         model.add_node(TimeDistributedDense(output_dim=self.vocab_size,
                                             input_dim=self.hidden_size,
                                             W_regularizer=l2(self.l2reg),
                                             activation='softmax'),
                                             name='output',
-                                            input='lstm',
+                                            input='rnn',
                                             create_output=True)
 
         if self.optimiser == 'adam':
             # allow user-defined hyper-parameters for ADAM because it is
             # our preferred optimiser
-            lr = self.lr if self.lr is not None else 0.001
-            beta1 = self.beta1 if self.beta1 is not None else 0.9
-            beta2 = self.beta2 if self.beta2 is not None else 0.999
-            epsilon = self.epsilon if self.epsilon is not None else 1e-8
-            optimiser = Adam(lr=lr, beta1=beta1,
-                             beta2=beta2, epsilon=epsilon,
+            optimiser = Adam(lr=self.lr, beta1=self.beta1,
+                             beta2=self.beta2, epsilon=self.epsilon,
                              clipnorm=self.clipnorm)
             model.compile(optimiser, {'output': 'categorical_crossentropy'})
         else:
@@ -104,23 +147,30 @@ class NIC:
 
 class MRNN:
 
-    def __init__(self, hidden_size, vocab_size, dropin, optimiser,
+    def __init__(self, embed_size, hidden_size, vocab_size, dropin, optimiser,
                  l2reg, hsn_size=512, weights=None, gru=False,
-                 clipnorm=-1, batch_size=None, t=None):
-        self.hidden_size = hidden_size  # number of units in first LSTM
-        self.dropin = dropin  # prob. of dropping input units
+                 clipnorm=-1, batch_size=None, t=None, lr=0.001):
+
+        self.max_t = t  # Expected timesteps. Needed to build the Theano graph
+
+        # Model hyperparameters
         self.vocab_size = vocab_size  # size of word vocabulary
-        self.optimiser = optimiser  # optimisation method
-        self.l2reg = l2reg  # weight regularisation penalty
+        self.embed_size = embed_size  # number of units in a word embedding
         self.hsn_size = hsn_size  # size of the source hidden vector
-        self.weights = weights  # initialise with checkpointed weights?
-        self.beta1 = None
-        self.beta2 = None
-        self.epsilon = None
-        self.lr = None
-        self.clipnorm = clipnorm
-        self.max_t = t
+        self.hidden_size = hidden_size  # number of units in first LSTM
         self.gru = gru  # gru recurrent layer? (false = lstm)
+        self.dropin = dropin  # prob. of dropping input units
+        self.l2reg = l2reg  # weight regularisation penalty
+
+        # Optimiser hyperparameters
+        self.optimiser = optimiser  # optimisation method
+        self.lr = lr
+        self.beta1 = 0.9
+        self.beta2 = 0.999
+        self.epsilon = 1e-8
+        self.clipnorm = clipnorm
+
+        self.weights = weights  # initialise with checkpointed weights?
 
     def buildKerasModel(self, use_sourcelang=False, use_image=True):
         '''
@@ -137,28 +187,81 @@ class MRNN:
 
         model = Graph()
         model.add_input('text', input_shape=(self.max_t, self.vocab_size))
+
+        # Word embeddings
+        model.add_node(TimeDistributedDense(output_dim=self.embed_size,
+                                            input_dim=self.vocab_size,
+                                            W_regularizer=l2(self.l2reg)),
+                                            name="w_embed", input='text')
+        model.add_node(Dropout(self.dropin), 
+                       name="w_embed_drop",
+                       input="w_embed")
+
+        # Embed -> Hidden
         model.add_node(TimeDistributedDense(output_dim=self.hidden_size,
-                                      input_dim=self.vocab_size,
+                                      input_dim=self.embed_size,
                                       W_regularizer=l2(self.l2reg)),
-                                      name='w_embed', input='text')
+                                      name='embed_to_hidden', input='w_embed')
+        recurrent_inputs = ['embed_to_hidden']
 
-        model.add_node(Dropout(self.dropin), name='w_embed_drop', input='w_embed')
-        model.add_node(LSTM(output_dim=self.hidden_size,
-                       input_dim=self.hidden_size,
-                       return_sequences=True), name='lstm',
-                       input='w_embed_drop')
+        # Source language input
+        if use_sourcelang:
+            model.add_input('source', input_shape=(self.max_t, self.hsn_size))
+            model.add_node(TimeDistributedDense(output_dim=self.hidden_size,
+                                                input_dim=self.hsn_size,
+                                                W_regularizer=l2(self.l2reg)),
+                                                name="s_embed",
+                                                input="source")
+            model.add_node(Dropout(self.dropin), 
+                           name="s_embed_drop",
+                           input="s_embed")
+            recurrent_inputs = ['embed_to_hidden', 's_embed_drop']
 
+        # Recurrent layer
+        if self.gru:
+            if use_sourcelang:
+                recurrent_inputs = ['embed_to_hidden',
+                                    's_embed_drop']
+                model.add_node(GRU(output_dim=self.hidden_size,
+                               input_dim=self.hidden_size,
+                               return_sequences=True), name='rnn',
+                               inputs=recurrent_inputs,
+                               merge_mode='sum')
+            else:
+                model.add_node(GRU(output_dim=self.hidden_size,
+                               input_dim=self.hidden_size,
+                               return_sequences=True), name='rnn',
+                               input=['embed_to_hidden'])
+
+        else:
+            if use_sourcelang:
+                recurrent_inputs = ['embed_to_hidden',
+                                    's_embed_drop']
+                model.add_node(LSTM(output_dim=self.hidden_size,
+                               input_dim=self.hidden_size,
+                               return_sequences=True), name='rnn',
+                               inputs=recurrent_inputs,
+                               merge_mode='sum')
+            else:
+                model.add_node(LSTM(output_dim=self.hidden_size,
+                               input_dim=self.hidden_size,
+                               return_sequences=True), name='rnn',
+                               input='embed_to_hidden')
+
+        # Image 'embedding'
         model.add_input('img', input_shape=(self.max_t, 4096))
         model.add_node(TimeDistributedDense(output_dim=self.hidden_size,
                                             input_dim=4096,
-                                            W_regularizer=l2(self.l2reg)), name='i_embed', input='img')
+                                            W_regularizer=l2(self.l2reg)),
+                                            name='i_embed', input='img')
         model.add_node(Dropout(self.dropin), name='i_embed_drop', input='i_embed')
 
+        # Multimodal layer outside the recurrent layer
         model.add_node(TimeDistributedDense(output_dim=self.hidden_size,
                                        input_dim=self.hidden_size,
                                        W_regularizer=l2(self.l2reg)),
-                                       name='m', inputs=['lstm',
-                                       'i_embed_drop'],
+                                       name='m_layer', 
+                                       inputs=['rnn','i_embed_drop'],
                                        merge_mode='sum')
 
         model.add_node(TimeDistributedDense(output_dim=self.vocab_size,
@@ -166,18 +269,14 @@ class MRNN:
                                             W_regularizer=l2(self.l2reg),
                                             activation='softmax'),
                                             name='output',
-                                            input='m',
+                                            input='m_layer',
                                             create_output=True)
 
         if self.optimiser == 'adam':
             # allow user-defined hyper-parameters for ADAM because it is
             # our preferred optimiser
-            lr = self.lr if self.lr is not None else 0.001
-            beta1 = self.beta1 if self.beta1 is not None else 0.9
-            beta2 = self.beta2 if self.beta2 is not None else 0.999
-            epsilon = self.epsilon if self.epsilon is not None else 1e-8
-            optimiser = Adam(lr=lr, beta1=beta1,
-                             beta2=beta2, epsilon=epsilon,
+            optimiser = Adam(lr=self.lr, beta1=self.beta1,
+                             beta2=self.beta2, epsilon=self.epsilon,
                              clipnorm=self.clipnorm)
             model.compile(optimiser, {'output': 'categorical_crossentropy'})
         else:
@@ -214,7 +313,6 @@ class OneLayerLSTM:
         self.clipnorm = clipnorm
         self.gru = gru  # gru recurrent layer? (false = lstm)
 
-    @profile
     def buildKerasModel(self, use_sourcelang=False, use_image=True):
         '''
         Define the exact structure of your model here. We create an image

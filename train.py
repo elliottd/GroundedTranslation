@@ -68,23 +68,25 @@ class VisualWordLSTM(object):
             hsn_size = self.data_generator.hsn_size  # ick
 
         if self.args.mrnn:
-            m = models.MRNN(self.args.hidden_size, self.V,
-                           self.args.dropin,
-                           self.args.optimiser, self.args.l2reg,
-                           hsn_size=hsn_size,
-                           weights=self.args.init_from_checkpoint,
-                           gru=self.args.gru,
-                           clipnorm=self.args.clipnorm,
-                           t=self.data_generator.max_seq_len)
+            m = models.MRNN(self.args.embed_size, self.args.hidden_size,
+                            self.V, self.args.dropin,
+                            self.args.optimiser, self.args.l2reg,
+                            hsn_size=hsn_size,
+                            weights=self.args.init_from_checkpoint,
+                            gru=self.args.gru,
+                            clipnorm=self.args.clipnorm,
+                            t=self.data_generator.max_seq_len,
+                            lr=self.args.lr)
         else:
-            m = models.NIC(self.args.hidden_size, self.V,
-                           self.args.dropin,
+            m = models.NIC(self.args.embed_size, self.args.hidden_size,
+                           self.V, self.args.dropin,
                            self.args.optimiser, self.args.l2reg,
                            hsn_size=hsn_size,
                            weights=self.args.init_from_checkpoint,
                            gru=self.args.gru,
                            clipnorm=self.args.clipnorm,
-                           t=self.data_generator.max_seq_len)
+                           t=self.data_generator.max_seq_len,
+                           lr=self.args.lr)
 
         model = m.buildKerasModel(use_sourcelang=self.use_sourcelang,
                                   use_image=self.use_image)
@@ -190,6 +192,7 @@ if __name__ == "__main__":
                         will be terminated if validation BLEU score does not\
                         increase for this number of epochs")
     parser.add_argument("--batch_size", default=100, type=int)
+    parser.add_argument("--embed_size", default=256, type=int)
     parser.add_argument("--hidden_size", default=256, type=int)
     parser.add_argument("--dropin", default=0.5, type=float,
                         help="Prob. of dropping embedding units. Default=0.5")
@@ -198,7 +201,7 @@ if __name__ == "__main__":
 
     parser.add_argument("--optimiser", default="adam", type=str,
                         help="Optimiser: rmsprop, momentum, adagrad, etc.")
-    parser.add_argument("--lr", default=None, type=float)
+    parser.add_argument("--lr", default=0.001, type=float)
     parser.add_argument("--beta1", default=None, type=float)
     parser.add_argument("--beta2", default=None, type=float)
     parser.add_argument("--epsilon", default=None, type=float)

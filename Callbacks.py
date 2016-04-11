@@ -20,8 +20,6 @@ import math
 import time
 from copy import deepcopy
 
-from memory_profiler import profile
-
 # Set up logger
 logging.basicConfig(level=logging.INFO, stream=sys.stdout)
 #logging.basicConfig(level=logging.DEBUG)

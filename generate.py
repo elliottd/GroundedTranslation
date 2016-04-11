@@ -74,16 +74,18 @@ class GroundedTranslationGenerator:
             self.hsn_size = 0
 
         if self.args.mrnn:
-            m = models.MRNN(self.args.hidden_size, self.vocab_len,
-                           self.args.dropin,
-                           self.args.optimiser, self.args.l2reg,
-                           hsn_size=self.hsn_size,
-                           weights=self.args.checkpoint,
-                           gru=self.args.gru,
-                           clipnorm=self.args.clipnorm,
-                           t=self.data_gen.max_seq_len)
+            m = models.MRNN(self.args.embed_size, self.args.hidden_size,
+                            self.vocab_len,
+                            self.args.dropin,
+                            self.args.optimiser, self.args.l2reg,
+                            hsn_size=self.hsn_size,
+                            weights=self.args.checkpoint,
+                            gru=self.args.gru,
+                            clipnorm=self.args.clipnorm,
+                            t=self.data_gen.max_seq_len)
         else:
-            m = models.NIC(self.args.hidden_size, self.vocab_len,
+            m = models.NIC(self.args.embed_size, self.args.hidden_size,
+                           self.vocab_len,
                            self.args.dropin,
                            self.args.optimiser, self.args.l2reg,
                            hsn_size=self.hsn_size,
@@ -493,6 +495,7 @@ if __name__ == "__main__":
                         context.)")
 
     parser.add_argument("--batch_size", default=100, type=int)
+    parser.add_argument("--embed_size", default=256, type=int)
     parser.add_argument("--hidden_size", default=256, type=int)
     parser.add_argument("--dropin", default=0.5, type=float,
                         help="Prob. of dropping embedding units. Default=0.5")
