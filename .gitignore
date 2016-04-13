@@ -1,2 +1,6 @@
 *.pyc
 *.{aux,bbl,blg,log,out}
+venv/*
+data/*
+logs/*
+*.sh
