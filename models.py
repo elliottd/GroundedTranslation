@@ -46,12 +46,8 @@ class NIC:
         Define the exact structure of your model here. We create an image
         description generation model by merging the VGG image features with
         a word embedding model, with an LSTM over the sequences.
-
-        The order in which these appear below (text, image) is _IMMUTABLE_.
-        (Needs to match up with input to model.fit.)
         '''
         logger.info('Building Keras model...')
-        logger.info('Using image features: %s', use_image)
 
         model = Graph()
         model.add_input('text', input_shape=(self.max_t, self.vocab_size))
@@ -69,10 +65,12 @@ class NIC:
         model.add_node(TimeDistributedDense(output_dim=self.hidden_size,
                                       input_dim=self.embed_size,
                                       W_regularizer=l2(self.l2reg)),
-                                      name='embed_to_hidden', input='w_embed')
+                                      name='embed_to_hidden',
+                                      input='w_embed_drop')
 
         if use_image:
             # Image 'embedding'
+            logger.info('Using image features: %s', use_image)
             model.add_input('img', input_shape=(self.max_t, 4096))
             model.add_node(TimeDistributedDense(output_dim=self.hidden_size,
                                                 input_dim=4096,
@@ -83,7 +81,7 @@ class NIC:
         if use_sourcelang:
             logger.info('Using source language features: %s', use_sourcelang)
             model.add_input('source', input_shape=(self.max_t, self.hsn_size))
-            model.add_node(TimeDistributedDense(ouptut_dim=self.hidden_size,
+            model.add_node(TimeDistributedDense(output_dim=self.hidden_size,
                                                 input_dim=self.hsn_size,
                                                 W_regularizer=l2(self.l2reg)),
                                                 name="s_embed", input="source")
@@ -100,6 +98,7 @@ class NIC:
             recurrent_inputs = ['embed_to_hidden', 'i_embed_drop']
         elif use_sourcelang:
             recurrent_inputs = ['embed_to_hidden', 's_embed_drop']
+        logger.info("Reccurrent inputs: %s", recurrent_inputs)
 
         # Recurrent layer
         if self.gru:
@@ -142,6 +141,83 @@ class NIC:
             model.load_weights("%s/weights.hdf5" % self.weights)
 
         #plot(model, to_file="model.png")
+
+        return model
+
+    def buildHSNActivations(self, use_image=True):
+        '''
+        Define the exact structure of your model here. We create an image
+        description generation model by merging the VGG image features with
+        a word embedding model, with an LSTM over the sequences.
+        '''
+
+        logger.info('Building Keras model...')
+        logger.info('Using image features: %s', use_image)
+
+        model = Graph()
+        model.add_input('text', input_shape=(self.max_t, self.vocab_size))
+
+        # Word embeddings
+        model.add_node(TimeDistributedDense(output_dim=self.embed_size,
+                                            input_dim=self.vocab_size,
+                                            W_regularizer=l2(self.l2reg)),
+                                            name="w_embed", input='text')
+        model.add_node(Dropout(self.dropin), 
+                       name="w_embed_drop",
+                       input="w_embed")
+
+        # Embed -> Hidden
+        model.add_node(TimeDistributedDense(output_dim=self.hidden_size,
+                                      input_dim=self.embed_size,
+                                      W_regularizer=l2(self.l2reg)),
+                                      name='embed_to_hidden',
+                                      input='w_embed')
+
+        if use_image:
+            # Image 'embedding'
+            model.add_input('img', input_shape=(self.max_t, 4096))
+            model.add_node(TimeDistributedDense(output_dim=self.hidden_size,
+                                                input_dim=4096,
+                                                W_regularizer=l2(self.l2reg)), name='i_embed', input='img')
+            model.add_node(Dropout(self.dropin), name='i_embed_drop', input='i_embed')
+
+
+        # Input nodes for the recurrent layer
+        if use_image:
+            recurrent_inputs = ['embed_to_hidden', 'i_embed_drop']
+
+        # Recurrent layer
+        if self.gru:
+            model.add_node(GRU(output_dim=self.hidden_size,
+                           input_dim=self.hidden_size,
+                           return_sequences=True), name='rnn',
+                           inputs=recurrent_inputs,
+                           merge_mode='sum',
+                           create_output=True)
+        else:
+            model.add_node(LSTM(output_dim=self.hidden_size,
+                           input_dim=self.hidden_size,
+                           return_sequences=True), name='rnn',
+                           inputs=recurrent_inputs,
+                           merge_mode='sum',
+                           create_output=True)
+
+        if self.optimiser == 'adam':
+            # allow user-defined hyper-parameters for ADAM because it is
+            # our preferred optimiser
+            optimiser = Adam(lr=self.lr, beta1=self.beta1,
+                             beta2=self.beta2, epsilon=self.epsilon,
+                             clipnorm=self.clipnorm)
+            model.compile(optimiser, {'rnn': 'categorical_crossentropy'})
+        else:
+            model.compile(self.optimiser, {'rnn': 'categorical_crossentropy'})
+
+        if self.weights is not None:
+            logger.info("... with weights defined in %s", self.weights)
+            # Initialise the weights of the model
+            shutil.copyfile("%s/weights.hdf5" % self.weights,
+                            "%s/weights.hdf5.bak" % self.weights)
+            model.load_weights("%s/weights.hdf5" % self.weights)
 
         return model
 

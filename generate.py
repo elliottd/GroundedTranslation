@@ -54,9 +54,11 @@ class GroundedTranslationGenerator:
 
     def generationModel(self):
         '''
-        In the model, we will merge the VGG image representation with
-        the word embeddings. We need to feed the data as a list, in which
-        the order of the elements in the list is _crucial_.
+        Entry point for this module.
+        Loads up a data generator to get the relevant image / source features.
+        Builds the relevant model, given the command-line arguments.
+        Generates sentences for the images in the val / test data.
+        Calculates BLEU and PPLX, unless requested.
         '''
 
         self.data_gen = VisualWordDataGenerator(self.args,
@@ -113,8 +115,6 @@ class GroundedTranslationGenerator:
         --source_vectors parameter.
         The output is clipped to the first EOS generated, if it exists.
 
-        WARNING: beam search is currently broken on this branch.
-
         TODO: duplicated method with generate.py
         """
 
@@ -127,12 +127,12 @@ class GroundedTranslationGenerator:
             start_gen = self.args.generate_from_N_words  # Default 0
             start_gen = start_gen + 1  # include BOS
 
-            val_generator = self.data_gen.generation_generator(prefix, batch_size=1)
+            generator = self.data_gen.generation_generator(prefix, batch_size=1)
             seen = 0
             # we are going to beam search for the most probably sentence.
             # let's do this one sentence at a time to make the logging output
             # easier to understand
-            for data in val_generator:
+            for data in generator:
                 text = data['text']
                 # Append the first start_gen words to the complete_sentences list
                 # for each instance in the batch.
@@ -141,15 +141,14 @@ class GroundedTranslationGenerator:
                     for i in range(text.shape[0]):
                         w = np.argmax(text[i, t])
                         complete_sentences[i].append(self.index2word[w])
+                del data['text']
                 text = self.reset_text_arrays(text, start_gen)
-                img = data['img']
+                Y_target = data['output']
+                data['text'] = text
 
                 max_beam_width = self.args.beam_width
-                structs = self.make_duplicate_matrices(text,
-                                                       img, 
-                                                       max_beam_width)
-                text = structs[0]
-                img = structs[1]
+                structs = self.make_duplicate_matrices(data, max_beam_width)
+
                 # A beam is a 2-tuple with the probability of the sequence and
                 # the words in that sequence. Start with empty beams
                 beams = [(0.0, [])]
@@ -164,9 +163,7 @@ class GroundedTranslationGenerator:
                     # we take a view of the datastructures, which means we're only
                     # ever generating a prediction for the next word. This saves a
                     # lot of cycles.
-                    preds = self.model.predict({'text': structs[0],
-                                                'img':  structs[1]}, 
-                                                verbose=0)
+                    preds = self.model.predict(structs, verbose=0)
 
                     # The last indices in preds are the predicted words
                     next_word_indices = preds['output'][:, t-1]
@@ -220,16 +217,14 @@ class GroundedTranslationGenerator:
 
                     # Reproduce the structs for the beam search so we can keep
                     # track of the state of each beam
-                    structs = self.make_duplicate_matrices(text,
-                                                           img,
-                                                           max_beam_width)
+                    structs = self.make_duplicate_matrices(data, max_beam_width)
 
                     # Rewrite the 1-hot word features with the
                     # so-far-predcicted tokens in a beam.
                     for bidx, b in enumerate(beams):
                         for idx, w in enumerate(b[1]):
                             next_word_index = w
-                            structs[0][bidx, idx+1, w] = 1.
+                            structs['text'][bidx, idx+1, w] = 1.
 
                 # If none of the sentences emitted an <E> token while
                 # decoding, add the final beams into the final candidates
@@ -274,10 +269,10 @@ class GroundedTranslationGenerator:
             handle = codecs.open("%s/%sGenerated" % (filepath, prefix), 
                                  "w", 'utf-8')
 
-            val_generator = self.data_gen.generation_generator(prefix)
+            generator = self.data_gen.generation_generator(prefix)
             seen = 0
-            for data in val_generator:
-                text = data['text']
+            for data in generator:
+                text = deepcopy(data['text'])
                 # Append the first start_gen words to the complete_sentences list
                 # for each instance in the batch.
                 complete_sentences = [[] for _ in range(text.shape[0])]
@@ -285,22 +280,22 @@ class GroundedTranslationGenerator:
                     for i in range(text.shape[0]):
                         w = np.argmax(text[i, t])
                         complete_sentences[i].append(self.index2word[w])
+                del data['text']
                 text = self.reset_text_arrays(text, start_gen)
-                img = data['img']
                 Y_target = data['output']
+                data['text'] = text
 
                 for t in range(start_gen, self.args.generation_timesteps):
-                    logger.debug("Input token: %s" % self.index2word[np.argmax(text[0,t-1])])
-                    preds = self.model.predict({'text': text,
-                                                'img':  img}, 
-                                                verbose=0)
+                    logger.debug("Input token: %s" % self.index2word[np.argmax(data['text'][0,t-1])])
+                    preds = self.model.predict(data,
+                                               verbose=0)
 
                     # Look at the last indices for the words.
                     next_word_indices = np.argmax(preds['output'][:, t-1], axis=1)
                     logger.debug("Predicted token: %s" % self.index2word[next_word_indices[0]])
                     # update array[0]/sentence-so-far with generated words.
                     for i in range(len(next_word_indices)):
-                        text[i, t, next_word_indices[i]] = 1.
+                        data['text'][i, t, next_word_indices[i]] = 1.
                     next_words = [self.index2word[x] for x in next_word_indices]
                     for i in range(len(next_words)):
                         complete_sentences[i].append(next_words[i])
@@ -314,17 +309,127 @@ class GroundedTranslationGenerator:
                     handle.write(decoded_str + "\n")
 
                 seen += text.shape[0]
-                if seen == self.data_gen.split_sizes['val']:
+                if seen == self.data_gen.split_sizes[prefix]:
                     # Hacky way to break out of the generator
                     break
             handle.close()
 
+    def calculate_pplx(self, path, val=True):
+        """ Splits the input data into batches of self.args.batch_size to
+        reduce the memory footprint of holding all of the data in RAM. """
+
+        prefix = "val" if val else "test"
+        logger.info("Calculating pplx over %s data", prefix)
+        sum_logprobs = 0
+        y_len = 0
+
+        generator = self.data_gen.fixed_generator(prefix)
+        seen = 0
+        for data in generator:
+            Y_target = deepcopy(data['output'])
+            del data['output']
+
+            preds = self.model.predict(data,
+                                       verbose=0,
+                                       batch_size=self.args.batch_size)
+
+            for i in range(Y_target.shape[0]):
+                for t in range(Y_target.shape[1]):
+                    target_idx = np.argmax(Y_target[i, t])
+                    target_tok = self.index2word[target_idx]
+                    if target_tok != "<P>":
+                        log_p = math.log(preds['output'][i, t, target_idx],2)
+                        sum_logprobs += -log_p
+                        y_len += 1
+
+            seen += data['text'].shape[0]
+            if seen == self.data_gen.split_sizes[prefix]:
+                # Hacky way to break out of the generator
+                break
+
+        norm_logprob = sum_logprobs / y_len
+        pplx = math.pow(2, norm_logprob)
+        logger.info("PPLX: %.4f", pplx)
+        handle = open("%s/%sPPLX" % (path, prefix), "w")
+        handle.write("%f\n" % pplx)
+        handle.close()
+        return pplx
+
+
     def reset_text_arrays(self, text_arrays, fixed_words=1):
         """ Reset the values in the text data structure to zero so we cannot
-        accidentally pass them into the model """
+        accidentally pass them into the model.
+
+        Helper function for generate_sentences().
+         """
         reset_arrays = deepcopy(text_arrays)
         reset_arrays[:,fixed_words:, :] = 0
         return reset_arrays
+
+    def make_duplicate_matrices(self, generator_data, k):
+        '''
+        Prepare K duplicates of the input data for a given instance yielded by
+        the data generator.
+
+        Helper function for the beam search decoder in generation_sentences().
+        '''
+
+        if self.use_sourcelang and self.use_image:
+            # the data generator yielded a dictionary with the words, the
+            # image features, and the source features
+            dupes = [[],[],[]]
+            words = generator_data['text']
+            img = generator_data['img']
+            source = generator_data['source']
+            for x in range(k):
+                # Make a deep copy of the word_feats structures 
+                # so the arrays will never be shared
+                dupes[0].append(deepcopy(words[0,:,:]))
+                dupes[1].append(source[0,:,:])
+                dupes[2].append(img[0,:,:])
+
+            # Turn the list of arrays into a numpy array
+            dupes[0] = np.array(dupes[0])
+            dupes[1] = np.array(dupes[1])
+            dupes[2] = np.array(dupes[2])
+
+            return {'text': dupes[0], 'img': dupes[2], 'source': dupes[1]}
+
+        elif self.use_image:
+            # the data generator yielded a dictionary with the words and the
+            # image features
+            dupes = [[],[]]
+            words = generator_data['text']
+            img = generator_data['img']
+            for x in range(k):
+                # Make a deep copy of the word_feats structures 
+                # so the arrays will never be shared
+                dupes[0].append(deepcopy(words[0,:,:]))
+                dupes[1].append(img[0,:,:])
+
+            # Turn the list of arrays into a numpy array
+            dupes[0] = np.array(dupes[0])
+            dupes[1] = np.array(dupes[1])
+
+            return {'text': dupes[0], 'img': dupes[1]}
+
+        elif self.use_sourcelang:
+            # the data generator yielded a dictionary with the words and the
+            # source features
+            dupes = [[],[]]
+            words = generator_data['text']
+            source= generator_data['source']
+            for x in range(k):
+                # Make a deep copy of the word_feats structures 
+                # so the arrays will never be shared
+                dupes[0].append(deepcopy(words[0,:,:]))
+                dupes[1].append(source[0,:,:])
+
+            # Turn the list of arrays into a numpy array
+            dupes[0] = np.array(dupes[0])
+            dupes[1] = np.array(dupes[1])
+
+            return {'text': dupes[0], 'source': dupes[1]}
 
     def find_best_checkpoint(self):
         '''
@@ -353,105 +458,6 @@ class GroundedTranslationGenerator:
         logger.info("Best checkpoint: %s/%s" % (self.args.model_checkpoints, checkpoint))
         return "%s/%s" % (self.args.model_checkpoints, checkpoint)
 
-    def yield_chunks(self, len_split_indices, batch_size):
-        '''
-        self.args.batch_size is not always cleanly divisible by the number of
-        items in the split, so we need to always yield the correct number of
-        items.
-        '''
-        for i in xrange(0, len_split_indices, batch_size):
-            # yield split_indices[i:i+batch_size]
-            yield (i, i+batch_size-1)
-
-    def make_generation_arrays(self, prefix, fixed_words, generation=False):
-        """Create arrays that are used as input for generation. """
-
-        input_data = self.data_gen.get_generation_data_by_split(prefix,
-                           self.use_sourcelang, self.use_image)
-
-        # Replace input words (input_data[0]) with zeros for generation,
-        # except for the first args.generate_from_N_words
-        # NOTE: this will include padding and BOS steps (fixed_words has been
-        # incremented accordingly already in generate_sentences().)
-        logger.info("Initialising with the first %d gold words (incl BOS)",
-                    fixed_words)
-        gen_input_data = deepcopy(input_data)
-        gen_input_data[0][:, fixed_words:, :] = 0
-
-        return gen_input_data
-
-    def make_duplicate_matrices(self, word_feats, img_feats, k):
-        '''
-        Prepare K duplicates of the input data for an image.
-        Useful for beam search decoding.
-        '''
-
-        duplicated = [[],[]]
-        for x in range(k):
-            # Make a deep copy of the word_feats structures 
-            # so the arrays will never be shared
-            duplicated[0].append(deepcopy(word_feats[0,:,:]))
-            duplicated[1].append(img_feats[0,:,:])
-
-        # Turn the list of arrays into a numpy array
-        duplicated[0] = np.array(duplicated[0])
-        duplicated[1] = np.array(duplicated[1])
-
-        return duplicated
-
-    def calculate_pplx(self, path, val=True):
-        """ Splits the input data into batches of self.args.batch_size to
-        reduce the memory footprint of holding all of the data in RAM. """
-
-        prefix = "val" if val else "test"
-        logger.info("Calculating pplx over %s data", prefix)
-        sum_logprobs = 0
-        y_len = 0
-
-        val_generator = self.data_gen.fixed_generator(prefix)
-        seen = 0
-        for data in val_generator:
-            text = data['text']
-            img = data['img']
-            Y_target = data['output']
-
-            preds = self.model.predict({'text': text, 'img': img},
-                                       verbose=0,
-                                       batch_size=self.args.batch_size)
-
-            for i in range(Y_target.shape[0]):
-                for t in range(Y_target.shape[1]):
-                    target_idx = np.argmax(Y_target[i, t])
-                    target_tok = self.index2word[target_idx]
-                    if target_tok != "<P>":
-                        log_p = math.log(preds['output'][i, t, target_idx],2)
-                        sum_logprobs += -log_p
-                        y_len += 1
-
-            seen += text.shape[0]
-            if seen == self.data_gen.split_sizes['val']:
-                # Hacky way to break out of the generator
-                break
-
-        norm_logprob = sum_logprobs / y_len
-        pplx = math.pow(2, norm_logprob)
-        logger.info("PPLX: %.4f", pplx)
-        handle = open("%s/%sPPLX" % (path, prefix), "w")
-        handle.write("%f\n" % pplx)
-        handle.close()
-        return pplx
-
-    def extract_references(self, directory, val=True):
-        """
-        Get reference descriptions for val, training subsection.
-        """
-        prefix = "val" if val else "test"
-        references = self.data_gen.get_refs_by_split_as_list(prefix)
-
-        for refid in xrange(len(references[0])):
-            codecs.open('%s/%s_reference.ref%d'
-                        % (directory, prefix, refid), 'w', 'utf-8').write('\n'.join([x[refid] for x in references]))
-
     def bleu_score(self, directory, val=True):
         '''
         PPLX is only weakly correlated with improvements in BLEU,
@@ -466,6 +472,19 @@ class GroundedTranslationGenerator:
         subprocess.check_call(
             ['perl multi-bleu.perl %s/%s_reference.ref < %s/%sGenerated | tee %s/%sBLEU'
              % (directory, prefix, directory, prefix, directory, prefix)], shell=True)
+
+    def extract_references(self, directory, val=True):
+        """
+        Get reference descriptions for split we are generating outputs for.
+
+        Helper function for bleu_score().
+        """
+        prefix = "val" if val else "test"
+        references = self.data_gen.get_refs_by_split_as_list(prefix)
+
+        for refid in xrange(len(references[0])):
+            codecs.open('%s/%s_reference.ref%d'
+                        % (directory, prefix, refid), 'w', 'utf-8').write('\n'.join([x[refid] for x in references]))
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Generate descriptions from a trained model using LSTM network")
