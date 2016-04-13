@@ -19,6 +19,7 @@ logger = logging.getLogger(__name__)
 
 # Dimensionality of image feature vector
 IMG_FEATS = 4096
+MAX_HT = 30
 
 
 class ExtractFinalHiddenStateActivations:
@@ -63,19 +64,113 @@ class ExtractFinalHiddenStateActivations:
         self.data_generator.set_vocabulary(self.args.checkpoint)
         self.vocab_len = len(self.data_generator.index2word)
 
-        m = models.OneLayerLSTM(self.args.hidden_size, self.vocab_len,
-                                self.args.dropin,
-                                self.args.optimiser, self.args.l2reg,
-                                weights=self.args.checkpoint,
-                                gru=self.args.gru)
+        m = models.NIC(self.args.embed_size, self.args.hidden_size,
+                       self.vocab_len,
+                       self.args.dropin,
+                       self.args.optimiser, self.args.l2reg,
+                       weights=self.args.checkpoint,
+                       gru=self.args.gru,
+                       t=self.data_generator.max_seq_len)
 
-        self.fhs = m.buildHSNActivations(self.use_image)
+        self.fhs = m.buildHSNActivations(use_image=self.use_image)
         if self.args.use_predicted_tokens and self.args.no_image == False:
             self.full_model = m.buildKerasModel(use_image=self.use_image)
 
-        self.generate_activations('train')
-        self.generate_activations('val')
-        self.generate_activations('test')
+        self.new_generate_activations('train')
+        self.new_generate_activations('val')
+        self.new_generate_activations('test')
+
+    def new_generate_activations(self, split):
+        '''
+        Generate and serialise final-timestep hidden state activations
+        into --dataset.
+        TODO: we should be able to serialise predicted final states instead of
+        gold-standard final states for val and test data.
+        '''
+        logger.info("%s: extracting final hidden state activations from this model", split)
+
+        if split == 'train':
+            hidden_states = []
+            batch_start = 0
+            batch_end = 0
+            for data in self.data_generator.fixed_generator(split=split):
+                # We extract the FHS from oracle training input tokens
+                hsn = self.fhs.predict({'text': data['text'],
+                                        'img': data['img']},
+                                       batch_size=self.args.batch_size,
+                                       verbose=1)
+
+                for idx, h in enumerate(hsn['rnn']):
+                    # get final_hidden index on a sentence-by-sentence
+                    # basis by searching for the first <E> in each trainY
+                    eos = False
+                    for widx, warr in enumerate(data['output'][idx]):
+                        w = np.argmax(warr)
+                        if self.data_generator.index2word[w] == "<E>":
+                            final_hidden = h[widx]
+                            hidden_states.append(final_hidden)
+                            eos = True
+                            logger.debug(widx)
+                            break
+                    if not eos:
+                        final_hidden = h[MAX_HT]
+                        hidden_states.append(final_hidden)
+                    batch_end += 1
+
+                # Note: serialisation happens over training batches too.
+                # now serialise the hidden representations in the h5
+                #self.serialise_to_h5(split, len(hidden_states[0]), hidden_states,
+                #                     batch_start, batch_end)
+                # KEYS ARE OVER IMAGES NOT DESCRIPTIONS
+                # THIS WILL BREAK IF THERE ARE MULTIPLE DESCRIPTIONS/IMAGE
+                self.serialise_to_h5(split, len(hidden_states[0]), 
+                                     hidden_states, batch_start, batch_end)
+
+                batch_start = batch_end
+                hidden_states = []
+                if batch_end == self.data_generator.split_sizes[split]:
+                    break
+
+        elif split == 'val' or split == "test":
+            hidden_states = []
+            batch_start = 0
+            batch_end = 0
+            for data in self.data_generator.fixed_generator(split=split):
+                # We extract the FHS from oracle training input tokens
+                hsn = self.fhs.predict({'text': data['text'],
+                                        'img': data['img']},
+                                       batch_size=self.args.batch_size,
+                                       verbose=1)
+
+                for idx, h in enumerate(hsn['rnn']):
+                    # get final_hidden index on a sentence-by-sentence
+                    # basis by searching for the first <E> in each trainY
+                    eos = False
+                    for widx, warr in enumerate(data['output'][idx]):
+                        w = np.argmax(warr)
+                        if self.data_generator.index2word[w] == "<E>":
+                            final_hidden = h[widx]
+                            hidden_states.append(final_hidden)
+                            eos = True
+                            break
+                    if not eos:
+                        final_hidden = h[MAX_HT]
+                        hidden_states.append(final_hidden)
+                    batch_end += 1
+
+                # Note: serialisation happens over training batches too.
+                # now serialise the hidden representations in the h5
+                #self.serialise_to_h5(split, len(hidden_states[0]), hidden_states,
+                #                     batch_start, batch_end)
+                # KEYS ARE OVER IMAGES NOT DESCRIPTIONS
+                # THIS WILL BREAK IF THERE ARE MULTIPLE DESCRIPTIONS/IMAGE
+                self.serialise_to_h5(split, len(hidden_states[0]), 
+                                     hidden_states, batch_start, batch_end)
+
+                batch_start = batch_end
+                hidden_states = []
+                if batch_end == self.data_generator.split_sizes[split]:
+                    break
 
     def generate_activations(self, split):
         '''
@@ -152,7 +247,8 @@ class ExtractFinalHiddenStateActivations:
                 #                     batch_start, batch_end)
                 # KEYS ARE OVER IMAGES NOT DESCRIPTIONS
                 # THIS WILL BREAK IF THERE ARE MULTIPLE DESCRIPTIONS/IMAGE
-                self.serialise_to_h5_keys(split, keys, hidden_states)
+                self.serialise_to_h5_keys(split, keys, hidden_states,
+                                          batch_start, batch_end)
 
                 batch_start = batch_end
                 hidden_states = []
@@ -418,6 +514,7 @@ if __name__ == "__main__":
                         help="Validate on 100 descriptions.")
 
     parser.add_argument("--batch_size", default=100, type=int)
+    parser.add_argument("--embed_size", default=256, type=int)
     parser.add_argument("--hidden_size", default=512, type=int)
     parser.add_argument("--dropin", default=0.5, type=float,
                         help="Prob. of dropping embedding units. Default=0.5")
@@ -468,6 +565,8 @@ if __name__ == "__main__":
                         back into the H5 file? This is useful when you want to\
                         train an LM-LM model with automatically generated\
                         source LM sentences. (Effectively an MLM-LM-LM).")
+
+    parser.add_argument("-mrnn", action="store_true")
 
     w = ExtractFinalHiddenStateActivations(parser.parse_args())
     w.get_hidden_activations()
