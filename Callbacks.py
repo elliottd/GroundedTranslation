@@ -433,6 +433,7 @@ class CompilationOfCallbacks(Callback):
         logger.info("Calculating pplx over %s data", prefix)
         sum_logprobs = 0
         y_len = 0
+        eps = 1e-31 # teeny tiny number to ensure we never take log(0)
 
         val_generator = self.data_generator.fixed_generator(prefix)
         seen = 0
@@ -449,8 +450,8 @@ class CompilationOfCallbacks(Callback):
                     target_idx = np.argmax(Y_target[i, t])
                     target_tok = self.index2word[target_idx]
                     if target_tok != "<P>":
-                        log_p = math.log(preds['output'][i, t, target_idx],2)
-                        sum_logprobs += -log_p
+                        p = math.log(preds['output'][i, t, target_idx]+eps,2)
+                        sum_logprobs += -p
                         y_len += 1
 
             seen += data['text'].shape[0]
