@@ -39,6 +39,8 @@ class GroundedTranslationGenerator:
         # consistent with models.py
         self.use_sourcelang = args.source_vectors is not None
         self.use_image = not args.no_image
+        self.model = None
+        self.prepare_datagenerator()
 
         # this results in two file handlers for dataset (here and
         # data_generator)
@@ -52,15 +54,7 @@ class GroundedTranslationGenerator:
             theano.config.optimizer = 'None'
             theano.config.exception_verbosity = 'high'
 
-    def generationModel(self):
-        '''
-        Entry point for this module.
-        Loads up a data generator to get the relevant image / source features.
-        Builds the relevant model, given the command-line arguments.
-        Generates sentences for the images in the val / test data.
-        Calculates BLEU and PPLX, unless requested.
-        '''
-
+    def prepare_datagenerator(self):
         self.data_gen = VisualWordDataGenerator(self.args,
                                                 self.args.dataset)
         self.args.checkpoint = self.find_best_checkpoint()
@@ -69,40 +63,28 @@ class GroundedTranslationGenerator:
         self.index2word = self.data_gen.index2word
         self.word2index = self.data_gen.word2index
 
+    def generate(self):
+        '''
+        Entry point for this module.
+        Loads up a data generator to get the relevant image / source features.
+        Builds the relevant model, given the command-line arguments.
+        Generates sentences for the images in the val / test data.
+        Calculates BLEU and PPLX, unless requested.
+        '''
+
         if self.use_sourcelang:
             # HACK FIXME unexpected problem with input_data
             self.hsn_size = 256
         else:
             self.hsn_size = 0
 
-        if self.args.mrnn:
-            m = models.MRNN(self.args.embed_size, self.args.hidden_size,
-                            self.vocab_len,
-                            self.args.dropin,
-                            self.args.optimiser, self.args.l2reg,
-                            hsn_size=self.hsn_size,
-                            weights=self.args.checkpoint,
-                            gru=self.args.gru,
-                            clipnorm=self.args.clipnorm,
-                            t=self.data_gen.max_seq_len)
-        else:
-            m = models.NIC(self.args.embed_size, self.args.hidden_size,
-                           self.vocab_len,
-                           self.args.dropin,
-                           self.args.optimiser, self.args.l2reg,
-                           hsn_size=self.hsn_size,
-                           weights=self.args.checkpoint,
-                           gru=self.args.gru,
-                           clipnorm=self.args.clipnorm,
-                           t=self.data_gen.max_seq_len)
-
-        self.model = m.buildKerasModel(use_sourcelang=self.use_sourcelang,
-                                       use_image=self.use_image)
+        if self.model == None:
+            self.build_model()
 
         self.generate_sentences(self.args.checkpoint, val=not self.args.test)
         if not self.args.without_scores:
-            self.bleu_score(self.args.checkpoint, val=not self.args.test)
             self.calculate_pplx(self.args.checkpoint, val=not self.args.test)
+            return self.bleu_score(self.args.checkpoint, val=not self.args.test)
 
     def generate_sentences(self, filepath, val=True):
         """
@@ -250,11 +232,12 @@ class GroundedTranslationGenerator:
                 handle.write(' '.join([x for x
                                        in itertools.takewhile(
                                            lambda n: n != "<E>", complete_sentences[i])]) + "\n")
-                logger.info("%s (%f)",' '.join([x for x
-                                      in itertools.takewhile(
-                                          lambda n: n != "<E>",
-                                          complete_sentences[i])]),
-                                      best_beam[0])
+                if self.args.verbose:
+                    logger.info("%s (%f)",' '.join([x for x
+                                          in itertools.takewhile(
+                                              lambda n: n != "<E>",
+                                              complete_sentences[i])]),
+                                          best_beam[0])
 
                 seen += text.shape[0]
                 if seen == self.data_gen.split_sizes['val']:
@@ -472,6 +455,11 @@ class GroundedTranslationGenerator:
         subprocess.check_call(
             ['perl multi-bleu.perl %s/%s_reference.ref < %s/%sGenerated | tee %s/%sBLEU'
              % (directory, prefix, directory, prefix, directory, prefix)], shell=True)
+        bleudata = open("%s/%sBLEU" % (directory, prefix)).readline()
+        data = bleudata.split(",")[0]
+        bleuscore = data.split("=")[1]
+        bleu = float(bleuscore.lstrip())
+        return bleu
 
     def extract_references(self, directory, val=True):
         """
@@ -485,6 +473,37 @@ class GroundedTranslationGenerator:
         for refid in xrange(len(references[0])):
             codecs.open('%s/%s_reference.ref%d'
                         % (directory, prefix, refid), 'w', 'utf-8').write('\n'.join([x[refid] for x in references]))
+
+    def build_model(self):
+        '''
+        Build a Keras model if one does not yet exist.
+
+        Helper function for generate().
+        '''
+        if self.args.mrnn:
+            m = models.MRNN(self.args.embed_size, self.args.hidden_size,
+                            self.vocab_len,
+                            self.args.dropin,
+                            self.args.optimiser, self.args.l2reg,
+                            hsn_size=self.hsn_size,
+                            weights=self.args.checkpoint,
+                            gru=self.args.gru,
+                            clipnorm=self.args.clipnorm,
+                            t=self.data_gen.max_seq_len)
+        else:
+            m = models.NIC(self.args.embed_size, self.args.hidden_size,
+                           self.vocab_len,
+                           self.args.dropin,
+                           self.args.optimiser, self.args.l2reg,
+                           hsn_size=self.hsn_size,
+                           weights=self.args.checkpoint,
+                           gru=self.args.gru,
+                           clipnorm=self.args.clipnorm,
+                           t=self.data_gen.max_seq_len)
+
+        self.model = m.buildKerasModel(use_sourcelang=self.use_sourcelang,
+                                       use_image=self.use_image)
+
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Generate descriptions from a trained model using LSTM network")
@@ -572,4 +591,4 @@ if __name__ == "__main__":
                         help="Verbose output while decoding? (Default = False")
 
     w = GroundedTranslationGenerator(parser.parse_args())
-    w.generationModel()
+    w.generate()
