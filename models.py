@@ -1,5 +1,5 @@
 from keras.models import Sequential, Graph
-from keras.layers.core import Activation, Dropout, Merge, TimeDistributedDense
+from keras.layers.core import Activation, Dropout, Merge, TimeDistributedDense, Masking
 from keras.layers.recurrent import LSTM, GRU
 from keras.layers.embeddings import Embedding
 from keras.regularizers import l2
@@ -51,40 +51,46 @@ class NIC:
 
         model = Graph()
         model.add_input('text', input_shape=(self.max_t, self.vocab_size))
+        model.add_node(Masking(mask_value=0.), input='text', name='text_mask')
 
         # Word embeddings
         model.add_node(TimeDistributedDense(output_dim=self.embed_size,
                                             input_dim=self.vocab_size,
                                             W_regularizer=l2(self.l2reg)),
-                                            name="w_embed", input='text')
-        model.add_node(Dropout(self.dropin), 
-                       name="w_embed_drop",
-                       input="w_embed")
+                                            name="w_embed", input='text_mask')
 
         # Embed -> Hidden
         model.add_node(TimeDistributedDense(output_dim=self.hidden_size,
-                                      input_dim=self.embed_size,
+                                      input_dim=self.vocab_size,
                                       W_regularizer=l2(self.l2reg)),
                                       name='embed_to_hidden',
-                                      input='w_embed_drop')
+                                      input='w_embed')
 
         if use_image:
             # Image 'embedding'
             logger.info('Using image features: %s', use_image)
             model.add_input('img', input_shape=(self.max_t, 4096))
+            model.add_node(Masking(mask_value=0.),
+                           input='img', name='img_mask')
             model.add_node(TimeDistributedDense(output_dim=self.hidden_size,
                                                 input_dim=4096,
-                                                W_regularizer=l2(self.l2reg)), name='i_embed', input='img')
+                                                W_regularizer=l2(self.l2reg)),
+                                                name='i_embed',
+                                                input='img_mask')
             model.add_node(Dropout(self.dropin), name='i_embed_drop', input='i_embed')
 
 
         if use_sourcelang:
             logger.info('Using source language features: %s', use_sourcelang)
             model.add_input('source', input_shape=(self.max_t, self.hsn_size))
+            model.add_node(Masking(mask_value=0.),
+                           input='source',
+                           name='source_mask')
             model.add_node(TimeDistributedDense(output_dim=self.hidden_size,
                                                 input_dim=self.hsn_size,
                                                 W_regularizer=l2(self.l2reg)),
-                                                name="s_embed", input="source")
+                                                name="s_embed",
+                                                input="source_mask")
             model.add_node(Dropout(self.dropin), 
                            name="s_embed_drop",
                            input="s_embed")
@@ -98,22 +104,29 @@ class NIC:
             recurrent_inputs = ['embed_to_hidden', 'i_embed_drop']
         elif use_sourcelang:
             recurrent_inputs = ['embed_to_hidden', 's_embed_drop']
-        logger.info("Reccurrent inputs: %s", recurrent_inputs)
 
         # Recurrent layer
         if self.gru:
+            logger.info("Building a GRU with recurrent inputs %s", recurrent_inputs)
             model.add_node(GRU(output_dim=self.hidden_size,
-                           input_dim=self.hidden_size,
-                           return_sequences=True), name='rnn',
+                           input_dim=2*self.hidden_size,
+                           return_sequences=True,
+                           W_regularizer=l2(self.l2reg),
+                           U_regularizer=l2(self.l2reg)),
+                           name='rnn',
                            inputs=recurrent_inputs,
-                           merge_mode='sum')
+                           merge_mode='concat')
 
         else:
+            logger.info("Building an LSTM with recurrent inputs %s", recurrent_inputs)
             model.add_node(LSTM(output_dim=self.hidden_size,
-                           input_dim=self.hidden_size,
-                           return_sequences=True), name='rnn',
+                           input_dim=2*self.hidden_size,
+                           return_sequences=True,
+                           W_regularizer=l2(self.l2reg),
+                           U_regularizer=l2(self.l2reg)),
+                           name='rnn',
                            inputs=recurrent_inputs,
-                           merge_mode='sum')
+                           merge_mode='concat')
 
         model.add_node(TimeDistributedDense(output_dim=self.vocab_size,
                                             input_dim=self.hidden_size,
@@ -263,13 +276,14 @@ class MRNN:
 
         model = Graph()
         model.add_input('text', input_shape=(self.max_t, self.vocab_size))
+        model.add_node(Masking(mask_value=0.), input='text', name='text_mask')
 
         # Word embeddings
         model.add_node(TimeDistributedDense(output_dim=self.embed_size,
                                             input_dim=self.vocab_size,
                                             W_regularizer=l2(self.l2reg)),
-                                            name="w_embed", input='text')
-        model.add_node(Dropout(self.dropin), 
+                                            name="w_embed", input='text_mask')
+        model.add_node(Dropout(self.dropin),
                        name="w_embed_drop",
                        input="w_embed")
 
@@ -283,12 +297,16 @@ class MRNN:
         # Source language input
         if use_sourcelang:
             model.add_input('source', input_shape=(self.max_t, self.hsn_size))
+            model.add_node(Masking(mask_value=0.),
+                           input='source',
+                           name='source_mask')
+
             model.add_node(TimeDistributedDense(output_dim=self.hidden_size,
                                                 input_dim=self.hsn_size,
                                                 W_regularizer=l2(self.l2reg)),
                                                 name="s_embed",
-                                                input="source")
-            model.add_node(Dropout(self.dropin), 
+                                                input="source_mask")
+            model.add_node(Dropout(self.dropin),
                            name="s_embed_drop",
                            input="s_embed")
             recurrent_inputs = ['embed_to_hidden', 's_embed_drop']
@@ -326,18 +344,21 @@ class MRNN:
 
         # Image 'embedding'
         model.add_input('img', input_shape=(self.max_t, 4096))
+        model.add_node(Masking(mask_value=0.),
+                       input='img', name='img_mask')
+
         model.add_node(TimeDistributedDense(output_dim=self.hidden_size,
                                             input_dim=4096,
                                             W_regularizer=l2(self.l2reg)),
-                                            name='i_embed', input='img')
+                                            name='i_embed', input='img_mask')
         model.add_node(Dropout(self.dropin), name='i_embed_drop', input='i_embed')
 
         # Multimodal layer outside the recurrent layer
         model.add_node(TimeDistributedDense(output_dim=self.hidden_size,
                                        input_dim=self.hidden_size,
                                        W_regularizer=l2(self.l2reg)),
-                                       name='m_layer', 
-                                       inputs=['rnn','i_embed_drop'],
+                                       name='m_layer',
+                                       inputs=['rnn','i_embed_drop', 'embed_to_hidden'],
                                        merge_mode='sum')
 
         model.add_node(TimeDistributedDense(output_dim=self.vocab_size,
