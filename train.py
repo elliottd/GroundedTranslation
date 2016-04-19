@@ -24,14 +24,11 @@ SMALL_NUM_DESCRIPTIONS = 300
 
 
 class GroundedTranslation(object):
-    """LSTM that combines visual features with textual descriptions.
-    TODO: more details. Inherits from object as new-style class.
-    """
 
     def __init__(self, args, datagen=None):
         '''
         Initialise the model and set Theano debugging model if
-        self.args.debug is true
+        self.args.debug is true. Prepare the data generator if necessary.
         '''
 
         self.args = args
@@ -125,11 +122,11 @@ class GroundedTranslation(object):
             self.data_generator = VisualWordDataGenerator(self.args,
                                                           self.args.dataset)
 
-        # Extract the working vocabulary from the training dataset
-        if self.args.existing_vocab != "":
-            self.data_generator.set_vocabulary(self.args.existing_vocab)
-        else:
-            self.data_generator.extract_vocabulary()
+            # Extract the working vocabulary from the training dataset
+            if self.args.existing_vocab != "":
+                self.data_generator.set_vocabulary(self.args.existing_vocab)
+            else:
+                self.data_generator.extract_vocabulary()
         self.V = self.data_generator.get_vocab_size()
 
 
@@ -144,8 +141,9 @@ class GroundedTranslation(object):
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(
-        description="Train an word embedding model using LSTM network")
+        description="Train an neural image description model")
 
+    # General options
     parser.add_argument("--run_string", default="", type=str,
                         help="Optional string to help you identify the run")
     parser.add_argument("--debug", action="store_true",
@@ -156,28 +154,30 @@ if __name__ == "__main__":
     parser.add_argument("--enable_val_pplx", action="store_true",
                         default=True,
                         help="Calculate and report smoothed validation pplx\
-                        instead of Keras objective function loss. Turns off\
-                        calculation of Keras val loss. (default=true)")
-    parser.add_argument("--generate_from_N_words", type=int, default=0,
-                        help="Use N words as starting point when generating\
-                        strings. Useful mostly for mt-only model (in other\
-                        cases, image provides enough useful starting\
-                        context.)")
-
-    parser.add_argument("--small", action="store_true",
-                        help="Run on 100 images. Useful for debugging")
+                        alongside the Keras objective function loss.\
+                        (default=true)")
+    parser.add_argument("--fixed_seed", action="store_true",
+                        help="Start with a fixed random seed? Useful for\
+                        reproding experiments. (default = False)")
     parser.add_argument("--num_sents", default=5, type=int,
                         help="Number of descriptions/image for training")
-    parser.add_argument("--small_val", action="store_true",
-                        help="Validate on 100 images. Useful for speed/memory")
 
-    # These options turn off image or source language inputs.
-    # Image data is *always* included in the hdf5 dataset, even if --no_image
-    # is set.
+    # Define the types of input data the model will receive
+    parser.add_argument("--dataset", default="", type=str, help="Path to the\
+                        HDF5 dataset to use for training / val input\
+                        (defaults to flickr8k)")
+    parser.add_argument("--supertrain_datasets", nargs="+", help="Paths to the\
+                        datasets to use as additional training input (defaults\
+                        to None)")
+    parser.add_argument("--unk", type=int,
+                        help="unknown character cut-off. Default=3", default=3)
+    parser.add_argument("--existing_vocab", type=str, default="",
+                        help="Use an existing vocabulary model to define the\
+                        vocabulary and UNKing in this dataset?\
+                        (default = "", which means we will derive the\
+                        vocabulary from the training dataset")
     parser.add_argument("--no_image", action="store_true",
                         help="Do not use image data.")
-    # If --source_vectors = None: model uses only visual/image input, no
-    # source language/encoder hidden layer representation feature vectors.
     parser.add_argument("--source_vectors", default=None, type=str,
                         help="Path to final hidden representations of\
                         encoder/source language VisualWordLSTM model.\
@@ -190,27 +190,7 @@ if __name__ == "__main__":
                         help="Source features over gold or predicted tokens?\
                         Expects 'gold' or 'predicted'. Required")
 
-    parser.add_argument("--dataset", default="", type=str, help="Path to the\
-                        HDF5 dataset to use for training / val input\
-                        (defaults to flickr8k)")
-    parser.add_argument("--supertrain_datasets", nargs="+", help="Paths to the\
-                        datasets to use as additional training input (defaults\
-                        to None)")
-
-    parser.add_argument("--big_batch_size", default=10000, type=int,
-                        help="Number of examples to load from disk at a time;\
-                        0 loads entire dataset. Default is 10000")
-
-    parser.add_argument("--predefined_epochs", action="store_true",
-                        help="Do you want to stop training after a specified\
-                        number of epochs, regardless of early-stopping\
-                        criteria? Use in conjunction with --max_epochs.")
-    parser.add_argument("--max_epochs", default=50, type=int,
-                        help="Maxmimum number of training epochs. Used with\
-                        --predefined_epochs")
-    parser.add_argument("--patience", type=int, default=10, help="Training\
-                        will be terminated if validation BLEU score does not\
-                        increase for this number of epochs")
+    # Model hyperparameters
     parser.add_argument("--batch_size", default=100, type=int)
     parser.add_argument("--embed_size", default=256, type=int)
     parser.add_argument("--hidden_size", default=256, type=int)
@@ -218,7 +198,17 @@ if __name__ == "__main__":
                         help="Prob. of dropping embedding units. Default=0.5")
     parser.add_argument("--gru", action="store_true", help="Use GRU instead\
                         of LSTM recurrent state? (default = False)")
+    parser.add_argument("--big_batch_size", default=10000, type=int,
+                        help="Number of examples to load from disk at a time;\
+                        0 loads entire dataset. Default is 10000")
+    parser.add_argument("--mrnn", action="store_true", 
+                        help="Use a Mao-style multimodal recurrent neural\
+                        network?")
+    parser.add_argument("--peeking_source", action="store_true",
+                        help="Input the source features at every timestep?\
+                        Default=False.")
 
+    # Optimisation details
     parser.add_argument("--optimiser", default="adam", type=str,
                         help="Optimiser: rmsprop, momentum, adagrad, etc.")
     parser.add_argument("--lr", default=0.001, type=float)
@@ -232,33 +222,38 @@ if __name__ == "__main__":
     parser.add_argument("--clipnorm", default=-1, type=float,
                         help="Clip gradients? (default = -1, which means\
                         don't clip the gradients.")
+    parser.add_argument("--max_epochs", default=50, type=int,
+                        help="Maxmimum number of training epochs. Used with\
+                        --predefined_epochs")
+    parser.add_argument("--patience", type=int, default=10, help="Training\
+                        will be terminated if validation BLEU score does not\
+                        increase for this number of epochs")
+    parser.add_argument("--no_early_stopping", action="store_true")
 
-    parser.add_argument("--unk", type=int,
-                        help="unknown character cut-off. Default=3", default=3)
+    # Language generation details
     parser.add_argument("--generation_timesteps", default=30, type=int,
                         help="Maximum number of words to generate for unseen\
                         data (default=10).")
+
+    # Legacy options
+    parser.add_argument("--generate_from_N_words", type=int, default=0,
+                        help="Use N words as starting point when generating\
+                        strings. Useful mostly for mt-only model (in other\
+                        cases, image provides enough useful starting\
+                        context.)")
+    parser.add_argument("--predefined_epochs", action="store_true",
+                        help="Do you want to stop training after a specified\
+                        number of epochs, regardless of early-stopping\
+                        criteria? Use in conjunction with --max_epochs.")
+
+    # Neccesary but unused in this module
     parser.add_argument("--h5_writeable", action="store_true",
                         help="Open the H5 file for write-access? Useful for\
                         serialising hidden states to disk. (default = False)")
-
     parser.add_argument("--use_predicted_tokens", action="store_true",
                         help="Generate final hidden state\
                         activations over oracle inputs or from predicted\
                         inputs? Default = False ( == Oracle)")
-    parser.add_argument("--fixed_seed", action="store_true",
-                        help="Start with a fixed random seed? Useful for\
-                        reproding experiments. (default = False)")
-    parser.add_argument("--existing_vocab", type=str, default="",
-                        help="Use an existing vocabulary model to define the\
-                        vocabulary and UNKing in this dataset?\
-                        (default = "", which means we will derive the\
-                        vocabulary from the training dataset")
-    parser.add_argument("--no_early_stopping", action="store_true")
-
-    parser.add_argument("--mrnn", action="store_true", 
-                        help="Use a Mao-style multimodal recurrent neural\
-                        network?")
 
     arguments = parser.parse_args()
 
