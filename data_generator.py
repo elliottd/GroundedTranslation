@@ -120,7 +120,6 @@ class VisualWordDataGenerator(object):
         # This counts number of descriptions per split
         # Ignores test for now (change in extract_vocabulary)
         self.split_sizes = {'train': 0, 'val': 0, 'test': 0}
-        self.calculate_split_sizes()
 
         # These are used to speed up the validation process
         self._cached_val_input = None
@@ -639,10 +638,14 @@ class VisualWordDataGenerator(object):
         for split in ["train", "val", "test"]:
             for dataset in self.datasets:
                 for data_key in dataset[split]:
-                    for description in dataset[split][data_key]['descriptions'][0:self.args_dict.num_sents]:
+                    for idx, description in enumerate(dataset[split][data_key]['descriptions'][0:self.args_dict.num_sents]):
                         w_indices = [self.word2index[w] for w in description.split() if w in self.word2index]
                         if len(w_indices) != 0:
                             self.split_sizes[split] += 1
+                        else:
+                            logger.warning("Skipping [%s][%s] ('%s') because\
+                            none of its words appear in the vocabulary",
+                            data_key, idx, description)
 
     def extract_complete_vocab(self):
         self.unk_dict = defaultdict(int)
@@ -870,7 +873,10 @@ class VisualWordDataGenerator(object):
                         description_array = self.format_sequence(description.split())
                         arrays[0][i] = description_array
                         if self.use_image and self.use_source:
-                            arrays[1][i, 0] = self.get_source_features(split, ident)
+                            if self.args_dict.peeking_source:
+                                arrays[1][i, :] = self.get_source_features(split, ident)
+                            else:
+                                arrays[1][i, 0] = self.get_source_features(split, ident)
                             if self.args_dict.mrnn:
                                 arrays[2][i, :] = img_feats
                             else:
@@ -881,7 +887,10 @@ class VisualWordDataGenerator(object):
                             else:
                                 arrays[1][i, 0] = img_feats
                         elif self.use_source:
-                            arrays[1][i, 0] = self.get_source_features(split, ident)
+                            if self.args_dict.peeking_source:
+                                arrays[1][i, :] = self.get_source_features(split, ident)
+                            else:
+                                arrays[1][i, 0] = self.get_source_features(split, ident)
 
                         i += 1
                     except AssertionError:
@@ -930,7 +939,10 @@ class VisualWordDataGenerator(object):
                         description_array = self.format_sequence(description.split())
                         arrays[0][i] = description_array
                         if self.use_image and self.use_source:
-                            arrays[1][i, 0] = self.get_source_features(split, ident)
+                            if self.args_dict.peekin_source:
+                                arrays[1][i, :] = self.get_source_features(split, ident)
+                            else:
+                                arrays[1][i, 0] = self.get_source_features(split, ident)
                             if self.args_dict.mrnn:
                                 arrays[2][i, :] = img_feats
                             else:
@@ -941,7 +953,10 @@ class VisualWordDataGenerator(object):
                             else:
                                 arrays[1][i, 0] = img_feats
                         elif self.use_source:
-                            arrays[1][i, 0] = self.get_source_features(split, ident)
+                            if self.args_dict.peeking_source:
+                                arrays[1][i, :] = self.get_source_features(split, ident)
+                            else:
+                                arrays[1][i, 0] = self.get_source_features(split, ident)
                         i += 1
                     except AssertionError:
                         # If the description doesn't share any words with the vocabulary.
@@ -1017,7 +1032,10 @@ class VisualWordDataGenerator(object):
                 description_array = self.format_sequence(description.split())
                 arrays[0][i] = description_array
                 if self.use_image and self.use_source:
-                    arrays[1][i, 0] = self.get_source_features(split, ident)
+                    if self.args_dict.peeking_source:
+                        arrays[1][i, :] = self.get_source_features(split, ident)
+                    else:
+                        arrays[1][i, 0] = self.get_source_features(split, ident)
                     if self.args_dict.mrnn:
                         arrays[2][i, :] = img_feats
                     else:
@@ -1028,7 +1046,10 @@ class VisualWordDataGenerator(object):
                     else:
                         arrays[1][i, 0] = img_feats
                 elif self.use_source:
-                    arrays[1][i, 0] = self.get_source_features(split, ident)
+                    if self.args_dict.peeking_source:
+                        arrays[1][i, :] = self.get_source_features(split, ident)
+                    else:
+                        arrays[1][i, 0] = self.get_source_features(split, ident)
                 i += 1
             except AssertionError:
                 # If the description doesn't share any words with the vocabulary.
