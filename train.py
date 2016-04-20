@@ -19,9 +19,6 @@ import keras.callbacks
 logging.basicConfig(level=logging.INFO, stream=sys.stdout)
 logger = logging.getLogger(__name__)
 
-# How many descriptions to use for training if "--small" is set.
-SMALL_NUM_DESCRIPTIONS = 300
-
 
 class GroundedTranslation(object):
 

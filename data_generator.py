@@ -27,10 +27,6 @@ PAD = "<P>"  # index 0
 # Dimensionality of image feature vector
 IMG_FEATS = 4096
 
-# How many descriptions to use for training if "--small" is set.
-SMALL_NUM_DESCRIPTIONS = 300
-SMALL_VAL = 100
-
 
 class VisualWordDataGenerator(object):
     """
@@ -65,9 +61,6 @@ class VisualWordDataGenerator(object):
         self.num_sents = args_dict.num_sents  # default 5 (for flickr8k)
         self.unk = args_dict.unk  # default 5
 
-        self.small = args_dict.small  # default False
-        if self.small:
-            logger.warn("--small: Truncating datasets!")
         self.run_string = args_dict.run_string
 
         # self.datasets holds 1+ datasets, where additional datasets will
@@ -181,8 +174,6 @@ class VisualWordDataGenerator(object):
             #training_size = self.split_sizes['train'] # this won't work with multiple datasets
             training_size = self.split_sizes['train']
             logging.info("training size %d", training_size)
-            if self.small:
-                training_size = SMALL_NUM_DESCRIPTIONS
 
             for data_key in dataset['train']:
                 ds = dataset['train'][data_key][self.ds_type][0:self.args_dict.num_sents]
@@ -201,11 +192,6 @@ class VisualWordDataGenerator(object):
                                    training_size, keys)
                         else:
                             yield (arrays, targets, num_descriptions == training_size)
-
-                        # Testing multiple big batches
-                        if self.small and num_descriptions >= training_size:
-                            logger.warn("Breaking out of yield_training_batch")
-                            raise StopIteration
 
                         # Create new training arrays that are either
                         # big_batch_size or the size of the number of
@@ -283,7 +269,6 @@ class VisualWordDataGenerator(object):
         Resize all the arrays to new_size along dimension 0.
         Sometimes we need to initialise a np.zeros() to an arbitrary size
         and then cut it down to out intended new_size.
-        Now used only with small_val.
         """
         logger.debug("Resizing batch_size in structures from %d -> %d",
                     arrays[0].shape[0], new_size)
@@ -308,9 +293,6 @@ class VisualWordDataGenerator(object):
             for descr in self.dataset[split][data_key]['descriptions']:
                 this_image.append(descr)
             references.append(this_image)
-            if self.args_dict.small_val and split == 'val':
-                if len(references) >= SMALL_VAL:
-                    break
 
         #if split == "val":
         #    self._cached_references = references
@@ -332,9 +314,6 @@ class VisualWordDataGenerator(object):
         Targets: target array for text LSTM (same format and data as
                 descriptions, timeshifted)
 
-        Changed: If small_val is set, the original arrays are now also a bit
-        smaller than split_size (and then truncated to d_idx, as before). This
-        is so I can run this on a lower-memory machine without thrashing.
         """
 
         logger.info("Making generation data for %s", split)
@@ -344,10 +323,6 @@ class VisualWordDataGenerator(object):
 
         split_size = self.split_sizes[split]
         intended_size = np.inf
-        if self.args_dict.small_val:
-            intended_size = SMALL_VAL
-            # Make split_size comfortably bigger than intended_size
-            split_size = 2 * SMALL_VAL * self.args_dict.num_sents
 
         arrays = self.get_new_training_arrays(split_size, use_sourcelang,
                                               use_image)
@@ -379,7 +354,7 @@ class VisualWordDataGenerator(object):
                 break
 
         # probably need to resize arrays for the generation data
-        if self.args_dict.small_val or d_idx < split_size:
+        if d_idx < split_size:
             # d_idx (number of descriptions before break) is new size.
             arrays = self.resize_arrays(d_idx, arrays)
 
@@ -406,9 +381,6 @@ class VisualWordDataGenerator(object):
         Targets: target array for text LSTM (same format and data as
                 descriptions, timeshifted)
 
-        Changed: If small_val is set, the original arrays are now also a bit
-        smaller than split_size (and then truncated to d_idx, as before). This
-        is so I can run this on a lower-memory machine without thrashing.
         """
 
         if (self._cached_val_input is not None and split == "val"):
@@ -422,10 +394,6 @@ class VisualWordDataGenerator(object):
 
         split_size = self.split_sizes[split]
         intended_size = np.inf
-        if self.args_dict.small_val:
-            intended_size = SMALL_VAL
-            # Make split_size comfortably bigger than intended_size
-            split_size = 2 * SMALL_VAL * self.args_dict.num_sents
 
         arrays = self.get_new_training_arrays(split_size, use_sourcelang,
                                               use_image)
@@ -453,10 +421,6 @@ class VisualWordDataGenerator(object):
                 d_idx += 1
             if d_idx >= intended_size:
                 break
-
-        if self.args_dict.small_val:
-            # d_idx (number of descriptions before break) is new size.
-            arrays = self.resize_arrays(d_idx, arrays)
 
         targets = self.get_target_descriptions(arrays[0])
 
@@ -488,13 +452,9 @@ class VisualWordDataGenerator(object):
         will be non-zero.
         """
         split_size = self.split_sizes[split]
-        if self.small:
-            split_size = 100
 
         img_array = np.zeros((split_size, self.max_seq_len, IMG_FEATS))
         for idx, data_key in enumerate(self.dataset[split]):
-            if self.small and idx >= split_size:
-                break
             img_array[idx, 0, :] = self.get_image_features(split, data_key)
         return img_array
 
