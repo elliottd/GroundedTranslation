@@ -491,7 +491,8 @@ class VisualWordDataGenerator(object):
 
         predicted_text[0] = " ".join([x for x in sentence])
 
-    def set_source_features(self, split, data_key, dataset_key, feats, dims):
+    def set_source_features(self, split, data_key, dataset_key, feats, dims,
+                            desc_idx=0):
         '''
         Set the source feature vector stored in the dataset_key group,
         creating the group if necessary, or erasing the current value if
@@ -504,29 +505,40 @@ class VisualWordDataGenerator(object):
 
         try:
             source_data = self.dataset[split][data_key].create_dataset(
-                                  dataset_key, (dims,), dtype='float32')
+                                  dataset_key, ((self.args_dict.num_sents, dims)),
+                                  dtype='float32')
         except RuntimeError:
-            # the dataset already exists, erase it and create an empty space
-            del self.dataset[split][data_key][dataset_key]
-            source_data = self.dataset[split][data_key].create_dataset(
-                                  dataset_key, (dims,), dtype='float32')
+            # the dataset already exists so we just need to fill in the
+            # relevant element, given the dataset key
+            source_data = self.dataset[split][data_key][dataset_key]
 
-        source_data[:] = feats
+        source_data[desc_idx] = feats
 
-    def get_source_features(self, split, data_key):
+    def get_source_features(self, split, data_key, mode='sum'):
         '''
         Return the source feature vector from self.source_dataset.
 
         Relies on self.source_encoder,
                   self.source_dim,
-                  self.source_type
+                  self.source_type.
+
+        Mode: 'sum', 'avg'.
+
+        TODO: support a 'concat' mode for merging the source features
         '''
 
         h5_dataset_str = "%s-hidden_feats-%s-%d" % (self.source_type,
                                                     self.source_encoder,
                                                     self.source_dim)
         try:
-            return self.source_dataset[split][data_key][h5_dataset_str]
+            source = self.source_dataset[split][data_key][h5_dataset_str]
+            if mode == 'sum' or mode =='avg':
+                return_feats = np.zeros(self.source_dim)
+                for feats in source:
+                    return_feats = np.add(return_feats, feats)
+                if mode == 'avg':
+                    return_feats = return_feats/source
+            return return_feats
         except KeyError:
             # this image -- description pair doesn't have a source-language
             # vector. Raise a KeyError so the requester can deal with the
@@ -781,24 +793,28 @@ class VisualWordDataGenerator(object):
                                     IMG_FEATS)))
         return arrays
 
-    def create_yield_dict(self, array, targets):
+    def create_yield_dict(self, array, targets, indices):
         '''
-        Returns a dictionary object of the array and the targets
+        Returns a dictionary object of the array, the targets,
+        and the image, description indices in the batch.
         '''
 
         if self.use_source and self.use_image:
             return {'text': array[0],
                     'source': array[1],
                     'img': array[2],
-                    'output': targets}
+                    'output': targets,
+                    'indices': indices}
         elif self.use_image:
             return {'text': array[0],
                     'img': array[1],
-                    'output': targets}
+                    'output': targets,
+                    'indices': indices}
         elif self.use_source:
             return {'text': array[0],
                     'source': array[1],
-                    'output': targets}
+                    'output': targets,
+                    'indices': indices}
 
     def random_generator(self, split):
         "Generator that produces input/output tuples for a given dataset and split."
@@ -814,6 +830,7 @@ class VisualWordDataGenerator(object):
         description_indices = list(range(num_descriptions))
 
         arrays = self.get_batch_arrays(self.args_dict.batch_size)
+        batch_indices = []
 
         j = 0
         # Shuffle the description indices.
@@ -833,10 +850,14 @@ class VisualWordDataGenerator(object):
                         description_array = self.format_sequence(description.split())
                         arrays[0][i] = description_array
                         if self.use_image and self.use_source:
-                            if self.args_dict.peeking_source:
-                                arrays[1][i, :] = self.get_source_features(split, ident)
+                            if self.args_dict.peekin_source:
+                                arrays[1][i, :] = \
+                                        self.get_source_features(split,
+                                                                 ident)
                             else:
-                                arrays[1][i, 0] = self.get_source_features(split, ident)
+                                arrays[1][i, 0] = \
+                                        self.get_source_features(split,
+                                                                 ident)
                             if self.args_dict.mrnn:
                                 arrays[2][i, :] = img_feats
                             else:
@@ -847,33 +868,41 @@ class VisualWordDataGenerator(object):
                             else:
                                 arrays[1][i, 0] = img_feats
                         elif self.use_source:
-                            if self.args_dict.peeking_source:
-                                arrays[1][i, :] = self.get_source_features(split, ident)
+                            if self.args_dict.peekin_source:
+                                arrays[1][i, :] = \
+                                        self.get_source_features(split,
+                                                                 ident)
                             else:
-                                arrays[1][i, 0] = self.get_source_features(split, ident)
-
+                                arrays[1][i, 0] = \
+                                        self.get_source_features(split,
+                                                                 ident)
+                        batch_indices.append([ident, desc_idx])
                         i += 1
                     except AssertionError:
                         # If the description doesn't share any words with the vocabulary.
                         pass
                     if i == self.args_dict.batch_size:
                         targets = self.get_target_descriptions(arrays[0])
-                        yield_data = self.create_yield_dict(arrays, targets)
+                        yield_data = self.create_yield_dict(arrays, targets,
+                                                            batch_indices)
                         #logger.debug(yield_data['img'][0,0,:])
                         #logger.debug(' '.join([self.index2word[np.argmax(x)] for x in yield_data['text'][0,:,:]]))
                         #logger.debug(' '.join([self.index2word[np.argmax(x)] for x in yield_data['output'][0,:,:]]))
                         yield yield_data
                         i = 0
                         arrays = self.get_batch_arrays(self.args_dict.batch_size)
+                        batch_indices = []
             if i != 0:
                 self.resize_arrays(i, arrays)
                 targets = self.get_target_descriptions(arrays[0])
                 #logger.info(' '.join([self.index2word[np.argmax(x)] for x in arrays[0][0,:,:]]))
-                yield_data = self.create_yield_dict(arrays,targets)
+                yield_data = self.create_yield_dict(arrays,targets,
+                                                    batch_indices)
                 yield yield_data
                 i = 0
                 j = 0
                 arrays = self.get_batch_arrays(self.args_dict.batch_size)
+                batch_indices = []
 
     def fixed_generator(self, split='val'):
         """Generator that returns the instances in a split in the fixed order
@@ -881,6 +910,7 @@ class VisualWordDataGenerator(object):
         No randomization."""
 
         arrays = self.get_batch_arrays(self.args_dict.batch_size)
+        batch_indices = []
         i = 0
         j = 0
         # Get the number of descriptions.
@@ -900,9 +930,13 @@ class VisualWordDataGenerator(object):
                         arrays[0][i] = description_array
                         if self.use_image and self.use_source:
                             if self.args_dict.peekin_source:
-                                arrays[1][i, :] = self.get_source_features(split, ident)
+                                arrays[1][i, :] = \
+                                        self.get_source_features(split,
+                                                                 ident)
                             else:
-                                arrays[1][i, 0] = self.get_source_features(split, ident)
+                                arrays[1][i, 0] = \
+                                        self.get_source_features(split,
+                                                                 ident)
                             if self.args_dict.mrnn:
                                 arrays[2][i, :] = img_feats
                             else:
@@ -914,9 +948,14 @@ class VisualWordDataGenerator(object):
                                 arrays[1][i, 0] = img_feats
                         elif self.use_source:
                             if self.args_dict.peeking_source:
-                                arrays[1][i, :] = self.get_source_features(split, ident)
+                                arrays[1][i, :] = \
+                                        self.get_source_features(split,
+                                                                 ident)
                             else:
-                                arrays[1][i, 0] = self.get_source_features(split, ident)
+                                arrays[1][i, 0] = \
+                                        self.get_source_features(split,
+                                                                 ident)
+                        batch_indices.append([ident, desc_idx])
                         i += 1
                     except AssertionError:
                         # If the description doesn't share any words with the vocabulary.
@@ -924,50 +963,27 @@ class VisualWordDataGenerator(object):
                         pass
                 if i == self.args_dict.batch_size:
                     targets = self.get_target_descriptions(arrays[0])
-                    yield_data = self.create_yield_dict(arrays, targets)
+                    yield_data = self.create_yield_dict(arrays, targets,
+                                                        batch_indices)
                     yield yield_data
                     i = 0
                     arrays = self.get_batch_arrays(self.args_dict.batch_size)
+                    batch_indices = []
             if i != 0:
                 logger.debug("Outside for loop")
                 self.resize_arrays(i, arrays)
                 targets = self.get_target_descriptions(arrays[0])
                 logger.debug(' '.join([self.index2word[np.argmax(x)] for x in
                     arrays[0][0,:,:] if self.index2word[np.argmax(x)] != "<P>"]))
-                yield_data = self.create_yield_dict(arrays, targets)
+                yield_data = self.create_yield_dict(arrays, targets,
+                                                    batch_indices)
                 yield yield_data
                 i = 0
                 j = 0
                 arrays = self.get_new_training_arrays(self.args_dict.batch_size, 
                                       self.args_dict.source_vectors is not None,
                                       not self.args_dict.no_image)
-#            for ident in identifiers:
-#                description = self.dataset['val'][ident]['descriptions'][0]
-#                img_feats = self.get_image_features(self.dataset, 'val', ident)
-#                try:
-#                    description_array = self.format_sequence(description.split())
-#                    arrays[0][i] = description_array
-#                    if self.args_dict.mrnn:
-#                        arrays[1][i, :] = img_feats
-#                    else:
-#                        arrays[1][i][0] = img_feats
-#                    i += 1
-#                    j += 1
-#                except AssertionError:
-#                    # If the description doesn't share any words with the vocabulary.
-#                    pass
-#                if i == self.args_dict.batch_size:
-#                    targets = self.get_target_descriptions(arrays[0])
-#                    logger.debug(arrays[0].shape)
-#                    logger.debug(' '.join([self.index2word[np.argmax(x)] for x
-#                        in arrays[0][0,:,:] if self.index2word[np.argmax(x)]
-#                        != "<P>"]))
-#                    yield {'text':arrays[0], 'img': arrays[1],
-#                           'output': targets}
-#                    i = 0
-#                    arrays = self.get_new_training_arrays(self.args_dict.batch_size, 
-#                                          self.args_dict.source_vectors is not None,
-#                                                  not self.args_dict.no_image)
+                batch_indices = []
 
     def generation_generator(self, split='val', batch_size=-1):
         """Generator for generating descriptions.
@@ -978,24 +994,31 @@ class VisualWordDataGenerator(object):
         beam search decoding.
         """
 
-        batch_size = self.args_dict.batch_size if batch_size == -1 else batch_size
+        identifiers = self.dataset[split].keys()
+        i = 0 # used to control the enumerator
+        batch_size = self.args_dict.batch_size \
+                if batch_size == -1 \
+                else batch_size
 
         arrays = self.get_batch_arrays(batch_size)
-        i = 0
-        j = 0
-        identifiers = self.dataset[split].keys()
+        batch_indices = []
+        desc_idx = 0
 
         for ident in identifiers:
-            description = self.dataset[split][ident]['descriptions'][0]
+            description = self.dataset[split][ident]['descriptions'][desc_idx]
             img_feats = self.get_image_features(self.dataset, split, ident)
             try:
                 description_array = self.format_sequence(description.split())
                 arrays[0][i] = description_array
                 if self.use_image and self.use_source:
                     if self.args_dict.peeking_source:
-                        arrays[1][i, :] = self.get_source_features(split, ident)
+                        arrays[1][i, :] = \
+                                self.get_source_features(split,
+                                                         ident)
                     else:
-                        arrays[1][i, 0] = self.get_source_features(split, ident)
+                        arrays[1][i, 0] = \
+                                self.get_source_features(split,
+                                                         ident)
                     if self.args_dict.mrnn:
                         arrays[2][i, :] = img_feats
                     else:
@@ -1007,9 +1030,14 @@ class VisualWordDataGenerator(object):
                         arrays[1][i, 0] = img_feats
                 elif self.use_source:
                     if self.args_dict.peeking_source:
-                        arrays[1][i, :] = self.get_source_features(split, ident)
+                        arrays[1][i, :] = \
+                                self.get_source_features(split,
+                                                         ident)
                     else:
-                        arrays[1][i, 0] = self.get_source_features(split, ident)
+                        arrays[1][i, 0] = \
+                                self.get_source_features(split,
+                                                         ident)
+                batch_indices.append([ident, desc_idx])
                 i += 1
             except AssertionError:
                 # If the description doesn't share any words with the vocabulary.
@@ -1020,17 +1048,23 @@ class VisualWordDataGenerator(object):
                 logger.debug(' '.join([self.index2word[np.argmax(x)] for x
                     in arrays[0][0,:,:] if self.index2word[np.argmax(x)]
                     != "<P>"]))
-                yield_data = self.create_yield_dict(arrays, targets)
+                yield_data = self.create_yield_dict(arrays,
+                                                    targets,
+                                                    batch_indices)
                 yield yield_data
                 i = 0
                 arrays = self.get_batch_arrays(batch_size)
+                batch_indices = []
         if i != 0:
             logger.debug("Outside for loop")
             self.resize_arrays(i, arrays)
             targets = self.get_target_descriptions(arrays[0])
             logger.debug(' '.join([self.index2word[np.argmax(x)] for x in
                 arrays[0][0,:,:] if self.index2word[np.argmax(x)] != "<P>"]))
-            yield_data = self.create_yield_dict(arrays, targets)
+            yield_data = self.create_yield_dict(arrays,
+                                                targets,
+                                                batch_indices)
             yield yield_data
             i = 0
             arrays = self.get_batch_arrays(batch_size)
+            batch_indices = []

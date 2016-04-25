@@ -119,12 +119,7 @@ class ExtractFinalHiddenStateActivations:
 
                 # Note: serialisation happens over training batches too.
                 # now serialise the hidden representations in the h5
-                #self.serialise_to_h5(split, len(hidden_states[0]), hidden_states,
-                #                     batch_start, batch_end)
-                # KEYS ARE OVER IMAGES NOT DESCRIPTIONS
-                # THIS WILL BREAK IF THERE ARE MULTIPLE DESCRIPTIONS/IMAGE
-                self.serialise_to_h5(split, len(hidden_states[0]), 
-                                     hidden_states, batch_start, batch_end)
+                self.to_h5_indices(split, data['indices'], hidden_states)
 
                 batch_start = batch_end
                 hidden_states = []
@@ -160,12 +155,7 @@ class ExtractFinalHiddenStateActivations:
 
                 # Note: serialisation happens over training batches too.
                 # now serialise the hidden representations in the h5
-                #self.serialise_to_h5(split, len(hidden_states[0]), hidden_states,
-                #                     batch_start, batch_end)
-                # KEYS ARE OVER IMAGES NOT DESCRIPTIONS
-                # THIS WILL BREAK IF THERE ARE MULTIPLE DESCRIPTIONS/IMAGE
-                self.serialise_to_h5(split, len(hidden_states[0]), 
-                                     hidden_states, batch_start, batch_end)
+                self.to_h5_indices(split, data['indices'], hidden_states)
 
                 batch_start = batch_end
                 hidden_states = []
@@ -371,6 +361,20 @@ class ExtractFinalHiddenStateActivations:
                                      in itertools.takewhile(
                                          lambda n: n != "<E>", s)])
         return pruned_sentences
+
+    def to_h5_indices(self, split, indices, hidden_states):
+        hsn_shape = len(hidden_states[0])
+        fhf_str = "final_hidden_features"
+        logger.info("Serialising final hidden state features from %s to H5",
+                    split)
+        for idx, data_key in enumerate(indices):
+            ident = data_key[0]
+            desc_idx = data_key[1]
+            self.data_generator.set_source_features(split, ident,
+                                                    self.h5_dataset_str,
+                                                    hidden_states[idx],
+                                                    hsn_shape,
+                                                    desc_idx)
 
     def serialise_to_h5_keys(self, split, data_keys, hidden_states):
         hsn_shape = len(hidden_states[0])
