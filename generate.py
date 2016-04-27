@@ -556,6 +556,10 @@ if __name__ == "__main__":
     parser.add_argument("--source_type", type=str, default=None,
                         help="Source features over gold or predicted tokens?\
                         Expects 'gold' or 'predicted'. Required")
+    parser.add_argument("--source_merge", type=str, default="sum",
+                        help="How to merge source features. Only applies if \
+                        there are multiple feature vectors. Expects 'sum', \
+                        'avg', or 'concat'.")
 
     # Model hyperparameters
     parser.add_argument("--batch_size", default=100, type=int)
