@@ -81,7 +81,8 @@ class NIC:
 
 
         if use_sourcelang:
-            logger.info('Using source language features: %s', use_sourcelang)
+            logger.info('Using source features: %s', use_sourcelang)
+            logger.info('Size of source feature vectors: %d', self.hsn_size)
             model.add_input('source', input_shape=(self.max_t, self.hsn_size))
             model.add_node(Masking(mask_value=0.),
                            input='source',
