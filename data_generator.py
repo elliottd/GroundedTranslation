@@ -209,7 +209,7 @@ class VisualWordDataGenerator(object):
 
         source_data[desc_idx] = feats
 
-    def get_source_features(self, split, data_key, mode='sum'):
+    def get_source_features(self, split, data_key):
         '''
         Return the source feature vector from self.source_dataset.
 
@@ -217,7 +217,9 @@ class VisualWordDataGenerator(object):
                   self.source_dim,
                   self.source_type.
 
-        Mode: 'sum', 'avg'.
+        The type of the returned vector depends on self.args.source_type:
+            'sum': will add all the vectors into the same vector
+            'avg': will do 'sum' and then divide by the number of vectors
 
         TODO: support a 'concat' mode for merging the source features
         '''
@@ -225,6 +227,8 @@ class VisualWordDataGenerator(object):
         h5_dataset_str = "%s-hidden_feats-%s-%d" % (self.source_type,
                                                     self.source_encoder,
                                                     self.source_dim)
+
+        mode = self.args.source_merge
         try:
             source = self.source_dataset[split][data_key][h5_dataset_str]
             if mode == 'sum' or mode =='avg':
@@ -232,7 +236,7 @@ class VisualWordDataGenerator(object):
                 for feats in source:
                     return_feats = np.add(return_feats, feats)
                 if mode == 'avg':
-                    return_feats = return_feats/source
+                    return_feats = return_feats/len(source)
             #elif mode =='concat':
             #    return_feats = np.zeros(self.source_dim*self.args.num_sents)
             #    marker = 0
