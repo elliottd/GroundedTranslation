@@ -74,7 +74,7 @@ class GroundedTranslationGenerator:
 
         if self.use_sourcelang:
             # HACK FIXME unexpected problem with input_data
-            self.hsn_size = 256
+            self.hsn_size = self.data_gen.hsn_size
         else:
             self.hsn_size = 0
 

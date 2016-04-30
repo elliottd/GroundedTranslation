@@ -58,7 +58,7 @@ class TimestepsAndBeamSearch(object):
         handle.close()
         run = 0
         for t in xrange(self.args.min_timesteps, self.args.max_timesteps+1):
-            for b in xrange(self.args.min_beam, self.args.max_beam+1, 5):
+            for b in xrange(self.args.min_beam, self.args.max_beam+1):
                 handle = open("../logs/timesteps-%s.log" % self.args.run_string, "a")
 
                 logger.info("Setting generation_timesteps to: %d", t)
@@ -127,6 +127,10 @@ if __name__ == "__main__":
     parser.add_argument("--source_type", type=str, default=None,
                         help="Source features over gold or predicted tokens?\
                         Expects 'gold' or 'predicted'. Required")
+    parser.add_argument("--source_merge", type=str, default="sum",
+                        help="How to merge source features. Only applies if \
+                        there are multiple feature vectors. Expects 'sum', \
+                        'avg', or 'concat'.")
 
     # Model hyperparameters
     parser.add_argument("--batch_size", default=100, type=int)
