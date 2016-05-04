@@ -76,6 +76,7 @@ for idx, image in enumerate(jdata['images']):
   if idx % 100 == 0:
    print("Processed %d/%d instances" % (idx, len(jdata['images'])))
 
+print("Processed %d/%d instances" % (idx, len(jdata['images'])))
 '''
 Here is an example of how to access the descriptions and the visual features at
 the same time. This shows the descriptions and visual features for the image
