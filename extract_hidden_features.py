@@ -58,8 +58,7 @@ class ExtractFinalHiddenStateActivations:
         '''
 
         self.data_generator = VisualWordDataGenerator(self.args,
-                                                      self.args.dataset,
-                                                      self.args.hidden_size)
+                                                      self.args.dataset)
         self.args.checkpoint = self.find_best_checkpoint()
         self.data_generator.set_vocabulary(self.args.checkpoint)
         self.vocab_len = len(self.data_generator.index2word)

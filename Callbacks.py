@@ -341,7 +341,8 @@ class CompilationOfCallbacks(Callback):
         handle = codecs.open("%s/%sGenerated" % (filepath, prefix), 
                              "w", 'utf-8')
 
-        val_generator = self.data_generator.generation_generator(prefix)
+        val_generator = self.data_generator.generation_generator(prefix,
+                                                                 in_callbacks=True)
         seen = 0
         for data in val_generator:
             text = deepcopy(data['text'])
