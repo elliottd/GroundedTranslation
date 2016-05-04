@@ -54,7 +54,7 @@ class TimestepsAndBeamSearch(object):
         sampler = GroundedTranslationGenerator(self.args)
 
         handle = open("../logs/timesteps-%s.log" % self.args.run_string, "w")
-        handle.write("{:3} | {:3} | {:3} | {:10}\n".format("Run", "T", "Beam", "BLEU"))
+        handle.write("{:3} | {:3} | {:3} | {:10}\n".format("Run", "T", "Beam", "Meteor"))
         handle.close()
         run = 0
         for t in xrange(self.args.min_timesteps, self.args.max_timesteps+1):
@@ -65,10 +65,12 @@ class TimestepsAndBeamSearch(object):
                 logger.info("Setting beam_width to: %d", b)
                 sampler.args.generation_timesteps = t
                 sampler.args.beam_width = b
-                bleu = sampler.generate()
+                sampler.model = None
+                meteor = sampler.generate()
 
                 handle.write("{:3d} | {:5} | {:5} | {:1.5f} \n".format(run,
-                             sampler.args.generation_timesteps, sampler.args.beam_width, bleu))
+                             sampler.args.generation_timesteps,
+                             sampler.args.beam_width, meteor))
                 handle.close()
                 run += 1
 
