@@ -5,6 +5,7 @@ from __future__ import division
 
 from keras.callbacks import Callback  # ModelCheckpoint , EarlyStopping
 
+import matplotlib.pyplot as plt
 import h5py
 import itertools
 import logging
@@ -90,15 +91,14 @@ class CompilationOfCallbacks(Callback):
         self.save_run_arguments(path)
 
         # Generate training and val sentences to check for overfitting
-        # self.generate_sentences(path, val=False)
-        # bleu = self.__bleu_score__(path, val=False)
         if self.args.enable_val_pplx:
-            val_pplx = self.calculate_pplx()
+            val_pplx = self.calculate_pplx(path)
         self.generate_sentences(path)
         val_bleu = self.__bleu_score__(path)
 
         self.early_stop_decision(len(self.val_bleu)+1, val_bleu, val_pplx)
         self.checkpoint_parameters(epoch, logs, path, val_bleu, val_pplx)
+        self.log_performance()
 
     def early_stop_decision(self, epoch, val_bleu, val_pplx):
         '''
@@ -108,7 +108,7 @@ class CompilationOfCallbacks(Callback):
         WARNING: quits with sys.exit(0).
         '''
 
-        if val_bleu > self.best_val_bleu:
+        if val_bleu > self.best_val_bleu or self.args.no_early_stopping:
             self.wait = 0
         else:
             self.wait += 1
@@ -123,14 +123,12 @@ class CompilationOfCallbacks(Callback):
                     handle.close()
                     sys.exit(0)
 
-    def on_train_end(self, logs={}):
+    def log_performance(self):
         '''
         Record model performance so far, based on whether we are tracking
         validation loss or validation pplx.
         '''
         handle = open("checkpoints/%s/summary" % self.args.run_string, "w")
-        logger.info("Training complete")
-        handle.write("Training complete \n")
 
         for epoch in range(len(self.val_pplx)):
             if self.args.enable_val_pplx:
@@ -190,6 +188,7 @@ class CompilationOfCallbacks(Callback):
             codecs.open('%s/%s_reference.ref%d' % (directory, split, refid),
                         'w', 'utf-8').write('\n'.join([x[refid] for x in references]))
                         #'w', 'utf-8').write('\n'.join(['\n'.join(x) for x in references]))
+        return references
 
     def __bleu_score__(self, directory, val=True):
         '''
@@ -261,16 +260,16 @@ class CompilationOfCallbacks(Callback):
             if cur_val_loss < self.best_val_loss:
                 self.best_val_loss = cur_val_loss
 
-            logger.info("Checkpoint %d: | val loss %0.5f (best: %0.5f) bleu %0.2f (best %0.2f)", 
-                        (len(self.val_loss) + 1),
-                        cur_val_loss, self.best_val_loss, cur_val_bleu,
-                        self.best_val_bleu)
+            #logger.info("Checkpoint %d: | val loss %0.5f (best: %0.5f) bleu %0.2f (best %0.2f)", 
+            #            (len(self.val_loss) + 1),
+            #            cur_val_loss, self.best_val_loss, cur_val_bleu,
+            #            self.best_val_bleu)
 
         if self.args.enable_val_pplx:
-            logger.info("Checkpoint %d: | val pplx %0.5f (best: %0.5f) bleu %0.2f (best %0.2f)", 
-                        (len(self.val_pplx) + 1),
-                        cur_val_pplx, self.best_val_pplx, cur_val_bleu,
-                        self.best_val_bleu)
+            #logger.info("Checkpoint %d: | val pplx %0.5f (best: %0.5f) bleu %0.2f (best %0.2f)", 
+            #            (len(self.val_pplx) + 1),
+            #            cur_val_pplx, self.best_val_pplx, cur_val_bleu,
+            #            self.best_val_bleu)
             self.val_pplx.append(cur_val_pplx)
             if cur_val_pplx < self.best_val_pplx:
                 self.best_val_pplx = cur_val_pplx
@@ -301,8 +300,7 @@ class CompilationOfCallbacks(Callback):
     def make_generation_arrays(self, prefix, fixed_words, generation=False):
         """Create arrays that are used as input for generation. """
 
-        # Y_target is unused
-        input_data, _ =\
+        input_data =\
             self.data_generator.get_generation_data_by_split(prefix,
                                 self.use_sourcelang, self.use_image)
 
@@ -317,6 +315,13 @@ class CompilationOfCallbacks(Callback):
 
         return gen_input_data
 
+    def reset_text_arrays(self, text_arrays, fixed_words=1):
+        """ Reset the values in the text data structure to zero so we cannot
+        accidentally pass them into the model """
+        reset_arrays = deepcopy(text_arrays)
+        reset_arrays[:,fixed_words:, :] = 0
+        return reset_arrays
+
     def generate_sentences(self, filepath, val=True):
         """
         Generates descriptions of images for --generation_timesteps
@@ -328,81 +333,82 @@ class CompilationOfCallbacks(Callback):
         --source_vectors parameter.
         The output is clipped to the first EOS generated, if it exists.
 
-        TODO: beam search
         TODO: duplicated method with generate.py
         """
         prefix = "val" if val else "test"
-        handle = codecs.open("%s/%sGenerated" % (filepath, prefix), "w",
-                             'utf-8')
         logger.info("Generating %s descriptions", prefix)
+        start_gen = self.args.generate_from_N_words + 1  # include BOS
+        handle = codecs.open("%s/%sGenerated" % (filepath, prefix), 
+                             "w", 'utf-8')
 
-        start_gen = self.args.generate_from_N_words  # Default 0
-        start_gen = start_gen + 1  # include BOS
+        val_generator = self.data_generator.generation_generator(prefix,
+                                                                 in_callbacks=True)
+        seen = 0
+        for data in val_generator:
+            text = deepcopy(data['text'])
+            # Append the first start_gen words to the complete_sentences list
+            # for each instance in the batch.
+            complete_sentences = [[] for _ in range(text.shape[0])]
+            for t in range(start_gen):  # minimum 1
+                for i in range(text.shape[0]):
+                    w = np.argmax(text[i, t])
+                    complete_sentences[i].append(self.index2word[w])
+            del data['text']
+            text = self.reset_text_arrays(text, start_gen)
+            Y_target = data['output']
+            data['text'] = text
 
-        # prepare the datastructures for generation (no batching over val)
-        arrays = self.make_generation_arrays(prefix, start_gen,
-                                             self.args.use_predicted_tokens)
-        N_sents = arrays[0].shape[0]
+            for t in range(start_gen, self.args.generation_timesteps):
+                logger.debug("Input token: %s" % self.index2word[np.argmax(data['text'][0,t-1])])
+                preds = self.model.predict(data,
+                                           verbose=0)
 
-        # complete_sentences = [["<S>"] for _ in range(N_sents)]
+                # Look at the last indices for the words.
+                next_word_indices = np.argmax(preds['output'][:, t-1], axis=1)
+                logger.debug("Predicted token: %s" % self.index2word[next_word_indices[0]])
+                # update array[0]/sentence-so-far with generated words.
+                for i in range(len(next_word_indices)):
+                    data['text'][i, t, next_word_indices[i]] = 1.
+                next_words = [self.index2word[x] for x in next_word_indices]
+                for i in range(len(next_words)):
+                    complete_sentences[i].append(next_words[i])
 
-        complete_sentences = [[] for _ in range(N_sents)]
-        for t in range(start_gen):  # minimum 1
-            for i in range(N_sents):
-                w = np.argmax(arrays[0][i, t])
-                complete_sentences[i].append(self.index2word[w])
+            sys.stdout.flush()
+            # print/extract each sentence until it hits the first end-of-string token
+            for s in complete_sentences:
+                decoded_str = ' '.join([x for x
+                                        in itertools.takewhile(
+                                            lambda n: n != "<E>", s[1:])])
+                handle.write(decoded_str + "\n")
 
-        logger.debug("Sentence 0 %s", complete_sentences[0])
-        logger.debug("Sentence 9 %s", complete_sentences[9])
-
-        logger.debug('t=start-1, %s', np.argmax(arrays[0][0, start_gen-1,:]))
-        logger.debug('t=start, %s', np.argmax(arrays[0][0, start_gen,:]))
-        logger.debug('t=start+1, %s', np.argmax(arrays[0][0, start_gen+1,:]))
-
-        for t in range(start_gen, self.args.generation_timesteps):
-            # we take a view of the datastructures, which means we're only
-            # ever generating a prediction for the next word. This saves a
-            # lot of cycles.
-            preds = self.model.predict([arr[:, 0:t] for arr in arrays],
-                                       verbose=0)
-
-            # Look at the last indices for the words.
-            next_word_indices = np.argmax(preds[:, -1], axis=1)
-            # update array[0]/sentence-so-far with generated words.
-            for i in range(N_sents):
-                arrays[0][i, t, next_word_indices[i]] = 1.
-            next_words = [self.index2word[x] for x in next_word_indices]
-            for i in range(len(next_words)):
-                complete_sentences[i].append(next_words[i])
-
-        logger.debug("At t=%d Sentence 0 %s ", t, complete_sentences[0])
-        logger.debug("At t=%d Sentence 9 %s ", t, complete_sentences[9])
-
-        sys.stdout.flush()
-        # print/extract each sentence until it hits the first end-of-string token
-        for s in complete_sentences:
-
-            decoded_str = ' '.join([x for x
-                                    in itertools.takewhile(
-                                        lambda n: n != "<E>", s[1:])])
-            handle.write(decoded_str + "\n")
-
+            seen += text.shape[0]
+            if seen == self.data_generator.split_sizes['val']:
+                # Hacky way to break out of the generator
+                break
         handle.close()
 
-    def calculate_pplx(self, val=True):
+    def calculate_pplx_old(self, path, val=True):
         """ Without batching. Robust against multiple descriptions/image,
-        since it uses data_generator.get_data_by_split input. """
+        since it uses data_generator.get_data_by_split input. 
+        We ignore OOV tokens, in line with other toolkits. See (D1) e.g.
+        http://www.speech.sri.com/projects/srilm/manpages/srilm-faq.7.html
+
+        Updated to prepare the Y_target data from the raw text instead of
+        bundling it up as a 1-hot vector.
+        """
         prefix = "val" if val else "test"
         logger.info("Calculating pplx over %s data", prefix)
-        sum_logprobs = 0
+        sum_logprobs = 0.0
         y_len = 0
+
         input_data, Y_target = self.data_generator.get_data_by_split(prefix,
                                        self.use_sourcelang, self.use_image)
 
         if self.args.debug:
             tic = time.time()
 
-        preds = self.model.predict(input_data, verbose=0)
+        preds = self.model.predict({'text': input_data[0],
+                                    'img': input_data[1]}, verbose=0)
 
         if self.args.debug:
             logger.info("Forward pass took %f", time.time()-tic)
@@ -411,10 +417,48 @@ class CompilationOfCallbacks(Callback):
             for i in range(Y_target.shape[0]):
                 target_idx = np.argmax(Y_target[i, t])
                 if self.index2word[target_idx] != "<P>":
-                    log_p = math.log(preds[i, t, target_idx],2)
-                    #logprobs.append(log_p)
+                    log_p = math.log(preds['output'][i, t, target_idx],2)
                     sum_logprobs += -log_p
                     y_len += 1
+
+        norm_logprob = sum_logprobs / y_len
+        pplx = math.pow(2, norm_logprob)
+        logger.info("PPLX: %.4f", pplx)
+        return pplx
+
+    def calculate_pplx(self, val=True):
+        """ Splits the input data into batches of self.args.batch_size to
+        reduce the memory footprint of holding all of the data in RAM. """
+
+        prefix = "val" if val else "test"
+        logger.info("Calculating pplx over %s data", prefix)
+        sum_logprobs = 0
+        y_len = 0
+        eps = 1e-31 # teeny tiny number to ensure we never take log(0)
+
+        val_generator = self.data_generator.fixed_generator(prefix)
+        seen = 0
+        for data in val_generator:
+            Y_target = deepcopy(data['output'])
+            del data['output']
+
+            preds = self.model.predict(data,
+                                       verbose=0,
+                                       batch_size=self.args.batch_size)
+
+            for i in range(Y_target.shape[0]):
+                for t in range(Y_target.shape[1]):
+                    target_idx = np.argmax(Y_target[i, t])
+                    target_tok = self.index2word[target_idx]
+                    if target_tok != "<P>":
+                        p = math.log(preds['output'][i, t, target_idx]+eps,2)
+                        sum_logprobs += -p
+                        y_len += 1
+
+            seen += data['text'].shape[0]
+            if seen == self.data_generator.split_sizes['val']:
+                # Hacky way to break out of the generator
+                break
 
         norm_logprob = sum_logprobs / y_len
         pplx = math.pow(2, norm_logprob)

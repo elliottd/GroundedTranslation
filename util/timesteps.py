@@ -1,144 +1,82 @@
 """
-Entry module and class module for training a GroundedTranslation model.
+For how many timesteps should you generate descriptions? Why not just
+grid-search it and then forget about it.
+
+Logs everything to ../logs/timesteps-%RUN_STRING.log
+
+WARNING: this code needs to be executed from inside the util directory.
+We should fix this as soon as possible.
 """
 
 from __future__ import print_function
+import sys
+sys.path.append("../") # HACK
 
 import argparse
 import logging
-from math import ceil
-import sys
+from math import ceil, log10
 
 from Callbacks import CompilationOfCallbacks
 from data_generator import VisualWordDataGenerator
 import models
+from generate import GroundedTranslationGenerator
 
 import keras.callbacks
+from numpy.random import uniform
 
 # Set up logger
 logging.basicConfig(level=logging.INFO, stream=sys.stdout)
 logger = logging.getLogger(__name__)
 
 
-class GroundedTranslation(object):
+class TimestepsAndBeamSearch(object):
 
-    def __init__(self, args, datagen=None):
+    def __init__(self, args):
         '''
         Initialise the model and set Theano debugging model if
-        self.args.debug is true. Prepare the data generator if necessary.
+        self.args.debug is true
         '''
 
         self.args = args
-        self.data_generator = datagen
         self.use_sourcelang = args.source_vectors is not None
         self.use_image = not args.no_image
-        self.log_run_arguments()
-        self.data_generator=datagen
-        self.prepare_datagenerator()
+        self.args.generation_timesteps=self.args.min_timesteps
 
         if self.args.debug:
             theano.config.optimizer = 'fast_compile'
             theano.config.exception_verbosity = 'high'
 
-    def train_model(self):
+    def dual_search(self):
         '''
-        Initialise the data generator to process the data in a memory-friendly
-        manner. Then build the Keras model, given the user-specified arguments
-        (or the initial defaults). Train the model for self.args.max_epochs
-        and return the training and validation losses.
-
-        The losses object contains a history variable. The history variable is
-        a dictionary with a list of training and validation losses:
-
-        losses.history.['loss']
-        losses.history.['val_loss']
+        Start grid searching through generation_timesteps and beam_width.
         '''
 
-        if not self.use_sourcelang:
-            hsn_size = 0
-        else:
-            hsn_size = self.data_generator.hsn_size  # ick
+        sampler = GroundedTranslationGenerator(self.args)
 
-        if self.args.mrnn:
-            m = models.MRNN(self.args.embed_size, self.args.hidden_size,
-                            self.V, self.args.dropin,
-                            self.args.optimiser, self.args.l2reg,
-                            hsn_size=hsn_size,
-                            weights=self.args.init_from_checkpoint,
-                            gru=self.args.gru,
-                            clipnorm=self.args.clipnorm,
-                            t=self.data_generator.max_seq_len,
-                            lr=self.args.lr)
-        else:
-            m = models.NIC(self.args.embed_size, self.args.hidden_size,
-                           self.V, self.args.dropin,
-                           self.args.optimiser, self.args.l2reg,
-                           hsn_size=hsn_size,
-                           weights=self.args.init_from_checkpoint,
-                           gru=self.args.gru,
-                           clipnorm=self.args.clipnorm,
-                           t=self.data_generator.max_seq_len,
-                           lr=self.args.lr)
+        handle = open("../logs/timesteps-%s.log" % self.args.run_string, "w")
+        handle.write("{:3} | {:3} | {:3} | {:10}\n".format("Run", "T", "Beam", "Meteor"))
+        handle.close()
+        run = 0
+        for t in xrange(self.args.min_timesteps, self.args.max_timesteps+1):
+            for b in xrange(self.args.min_beam, self.args.max_beam+1):
+                handle = open("../logs/timesteps-%s.log" % self.args.run_string, "a")
 
-        model = m.buildKerasModel(use_sourcelang=self.use_sourcelang,
-                                  use_image=self.use_image)
+                logger.info("Setting generation_timesteps to: %d", t)
+                logger.info("Setting beam_width to: %d", b)
+                sampler.args.generation_timesteps = t
+                sampler.args.beam_width = b
+                sampler.model = None
+                meteor = sampler.generate()
 
-        callbacks = CompilationOfCallbacks(self.data_generator.word2index,
-                                           self.data_generator.index2word,
-                                           self.args,
-                                           self.args.dataset,
-                                           self.data_generator,
-                                           use_sourcelang=self.use_sourcelang,
-                                           use_image=self.use_image)
-
-        train_generator = self.data_generator.random_generator('train')
-        train_size = self.data_generator.split_sizes['train']
-        val_generator = self.data_generator.fixed_generator('val')
-        val_size = self.data_generator.split_sizes['val']
-
-        losses = model.fit_generator(generator=train_generator,
-                                     samples_per_epoch=train_size,
-                                     nb_epoch= self.args.max_epochs,
-                                     verbose=1,
-                                     callbacks=[callbacks],
-                                     nb_worker=1,
-                                     validation_data=val_generator,
-                                     nb_val_samples=val_size)
-
-        return losses
-
-    def prepare_datagenerator(self):
-        '''
-        Initialise the data generator and its datastructures, unless a valid
-        data generator was already passed into the
-        GroundedTranslation.__init() function.
-        '''
-
-        # Initialise the data generator if it has not yet been initialised
-        if self.data_generator == None:
-            self.data_generator = VisualWordDataGenerator(self.args,
-                                                          self.args.dataset)
-
-            # Extract the working vocabulary from the training dataset
-            if self.args.existing_vocab != "":
-                self.data_generator.set_vocabulary(self.args.existing_vocab)
-            else:
-                self.data_generator.extract_vocabulary()
-        self.V = self.data_generator.get_vocab_size()
-
-
-    def log_run_arguments(self):
-        '''
-        Save the command-line arguments, along with the method defaults,
-        used to parameterise this run.
-        '''
-        logger.info("Run arguments:")
-        for arg, value in self.args.__dict__.iteritems():
-            logger.info("%s: %s" % (arg, str(value)))
+                handle.write("{:3d} | {:5} | {:5} | {:1.5f} \n".format(run,
+                             sampler.args.generation_timesteps,
+                             sampler.args.beam_width, meteor))
+                handle.close()
+                run += 1
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(
-        description="Train an neural image description model")
+    parser = argparse.ArgumentParser(description="Randomly sweep through some\
+            hyperparameters for your model.")
 
     # General options
     parser.add_argument("--run_string", default="", type=str,
@@ -158,6 +96,11 @@ if __name__ == "__main__":
                         reproding experiments. (default = False)")
     parser.add_argument("--num_sents", default=5, type=int,
                         help="Number of descriptions/image for training")
+    parser.add_argument("--model_checkpoints", type=str, required=True,
+                        help="Path to the checkpointed parameters")
+    parser.add_argument("--best_pplx", action="store_true",
+                        help="Use the best PPLX checkpoint instead of the\
+                        best BLEU checkpoint? Default = False.")
 
     # Define the types of input data the model will receive
     parser.add_argument("--dataset", default="", type=str, help="Path to the\
@@ -232,9 +175,23 @@ if __name__ == "__main__":
     parser.add_argument("--no_early_stopping", action="store_true")
 
     # Language generation details
-    parser.add_argument("--generation_timesteps", default=30, type=int,
+    parser.add_argument("--generation_timesteps", default=10, type=int,
                         help="Maximum number of words to generate for unseen\
                         data (default=10).")
+    parser.add_argument("--test", action="store_true",
+                        help="Generate for the test images? (Default=False)\
+                        which means we will generate for the val images")
+    parser.add_argument("--without_scores", action="store_true",
+                        help="Don't calculate BLEU or perplexity. Useful if\
+                        you only want to see the generated sentences or if\
+                        you don't have ground-truth sentences for evaluation.")
+    parser.add_argument("--beam_width", type=int, default=1,
+                        help="Number of hypotheses to consider when decoding.\
+                        Default=1, which means arg max decoding.")
+    parser.add_argument("--verbose", action="store_true",
+                        help="Verbose output while decoding? If you choose\
+                        verbose output then you'll see the total beam search\
+                        decoding process. (Default = False)")
 
     # Legacy options
     parser.add_argument("--generate_from_N_words", type=int, default=0,
@@ -256,6 +213,13 @@ if __name__ == "__main__":
                         activations over oracle inputs or from predicted\
                         inputs? Default = False ( == Oracle)")
 
+    # Timesteps and beam-width grid search parameters
+
+    parser.add_argument("--min_timesteps", type=int, default=10)
+    parser.add_argument("--max_timesteps", type=int, default=20)
+    parser.add_argument("--min_beam", type=int, default=1)
+    parser.add_argument("--max_beam", type=int, default=5)
+
     arguments = parser.parse_args()
 
     if arguments.source_vectors is not None:
@@ -268,5 +232,5 @@ if __name__ == "__main__":
         np.random.seed(1234)
 
     import theano
-    model = GroundedTranslation(arguments)
-    model.train_model()
+    t_and_b = TimestepsAndBeamSearch(arguments)
+    t_and_b.dual_search()

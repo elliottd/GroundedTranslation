@@ -1,111 +1,98 @@
 """
-Entry module and class module for training a GroundedTranslation model.
+Maybe you want to randomly search for some interesting hyperparameters for you
+model? http://www.jmlr.org/papers/volume13/bergstra12a/bergstra12a.pdf
+
+Logs everything to ../logs/sweeper-$RUN_STRING.log
 """
 
 from __future__ import print_function
+import sys
+sys.path.append("..") # ugly hack
 
 import argparse
 import logging
-from math import ceil
-import sys
+from math import ceil, log10
 
 from Callbacks import CompilationOfCallbacks
 from data_generator import VisualWordDataGenerator
 import models
+from train import GroundedTranslation
 
 import keras.callbacks
+from numpy.random import uniform
 
 # Set up logger
 logging.basicConfig(level=logging.INFO, stream=sys.stdout)
 logger = logging.getLogger(__name__)
 
 
-class GroundedTranslation(object):
+class Sweep(object):
 
-    def __init__(self, args, datagen=None):
+    def __init__(self, args):
         '''
         Initialise the model and set Theano debugging model if
-        self.args.debug is true. Prepare the data generator if necessary.
+        self.args.debug is true
         '''
 
         self.args = args
-        self.data_generator = datagen
         self.use_sourcelang = args.source_vectors is not None
         self.use_image = not args.no_image
-        self.log_run_arguments()
-        self.data_generator=datagen
+        self.data_generator = None
         self.prepare_datagenerator()
 
         if self.args.debug:
             theano.config.optimizer = 'fast_compile'
             theano.config.exception_verbosity = 'high'
 
-    def train_model(self):
+    def random_sweep(self):
         '''
-        Initialise the data generator to process the data in a memory-friendly
-        manner. Then build the Keras model, given the user-specified arguments
-        (or the initial defaults). Train the model for self.args.max_epochs
-        and return the training and validation losses.
+        Start randomly sweeping through hyperparameter ranges.
 
-        The losses object contains a history variable. The history variable is
-        a dictionary with a list of training and validation losses:
-
-        losses.history.['loss']
-        losses.history.['val_loss']
+        This current only supports sweeping through the L2 regularisation
+        strength, the learning rate, and the dropout probability.
         '''
 
-        if not self.use_sourcelang:
-            hsn_size = 0
-        else:
-            hsn_size = self.data_generator.hsn_size  # ick
+        model = GroundedTranslation(self.args, datagen=self.data_generator)
 
-        if self.args.mrnn:
-            m = models.MRNN(self.args.embed_size, self.args.hidden_size,
-                            self.V, self.args.dropin,
-                            self.args.optimiser, self.args.l2reg,
-                            hsn_size=hsn_size,
-                            weights=self.args.init_from_checkpoint,
-                            gru=self.args.gru,
-                            clipnorm=self.args.clipnorm,
-                            t=self.data_generator.max_seq_len,
-                            lr=self.args.lr)
-        else:
-            m = models.NIC(self.args.embed_size, self.args.hidden_size,
-                           self.V, self.args.dropin,
-                           self.args.optimiser, self.args.l2reg,
-                           hsn_size=hsn_size,
-                           weights=self.args.init_from_checkpoint,
-                           gru=self.args.gru,
-                           clipnorm=self.args.clipnorm,
-                           t=self.data_generator.max_seq_len,
-                           lr=self.args.lr)
+        handle = open("../logs/sweeper-%s.log" % self.args.run_string, "w")
+        handle.write("{:3} | {:10} | {:10} | {:10} | {:10} | {:10} \n".format("Run",
+            "loss", "val_loss", "lr", "reg", "dropin"))
+        handle.close()
+        for sweep in xrange(self.args.num_sweeps):
+            # randomly sample a learning rate and an L2 regularisation
+            handle = open("../logs/sweeper-%s.log" % self.args.run_string, "a")
+            if self.args.min_lr == ceil(self.args.min_lr):
+                # you provided an exponent, we'll search in log-space
+                lr = 10**uniform(self.args.min_lr, self.args.max_lr)
+            else:
+                # you provided a specific number
+                lr = 10**uniform(log10(self.args.min_lr),
+                                 log10(self.args.max_lr))
 
-        model = m.buildKerasModel(use_sourcelang=self.use_sourcelang,
-                                  use_image=self.use_image)
+            if self.args.min_l2 == ceil(self.args.min_l2):
+                # you provided an exponent, we'll search in log-space
+                l2 = 10**uniform(self.args.min_l2, self.args.max_l2)
+            else:
+                # you provide a specific number
+                l2 = 10**uniform(log10(self.args.min_l2),
+                                 log10(self.args.max_l2))
+            drop_in = uniform(self.args.min_dropin, self.args.max_dropin)
 
-        callbacks = CompilationOfCallbacks(self.data_generator.word2index,
-                                           self.data_generator.index2word,
-                                           self.args,
-                                           self.args.dataset,
-                                           self.data_generator,
-                                           use_sourcelang=self.use_sourcelang,
-                                           use_image=self.use_image)
+            # modify the arguments that will be used to create the graph
+            model.args.lr = lr
+            model.args.l2reg = l2
+            model.args.dropin = drop_in
 
-        train_generator = self.data_generator.random_generator('train')
-        train_size = self.data_generator.split_sizes['train']
-        val_generator = self.data_generator.fixed_generator('val')
-        val_size = self.data_generator.split_sizes['val']
+            logger.info("Setting learning rate to: %.5e", lr)
+            logger.info("Setting l2reg to: %.5e", l2)
+            logger.info("Setting dropout to: %f", drop_in)
 
-        losses = model.fit_generator(generator=train_generator,
-                                     samples_per_epoch=train_size,
-                                     nb_epoch= self.args.max_epochs,
-                                     verbose=1,
-                                     callbacks=[callbacks],
-                                     nb_worker=1,
-                                     validation_data=val_generator,
-                                     nb_val_samples=val_size)
-
-        return losses
+            # initialise and compile a new model
+            losses = model.train_model()
+            handle.write("{:3d} | {:5.5f} | {:5.5f} | {:5e} | {:5e} | {:5.4f} \n".format(sweep,
+                         losses.history['loss'][-1],
+                         losses.history['val_loss'][-1], lr, l2, drop_in))
+            handle.close()
 
     def prepare_datagenerator(self):
         '''
@@ -119,26 +106,16 @@ class GroundedTranslation(object):
             self.data_generator = VisualWordDataGenerator(self.args,
                                                           self.args.dataset)
 
-            # Extract the working vocabulary from the training dataset
-            if self.args.existing_vocab != "":
-                self.data_generator.set_vocabulary(self.args.existing_vocab)
-            else:
-                self.data_generator.extract_vocabulary()
+        # Extract the working vocabulary from the training dataset
+        if self.args.existing_vocab != "":
+            self.data_generator.set_vocabulary(self.args.existing_vocab)
+        else:
+            self.data_generator.extract_vocabulary()
         self.V = self.data_generator.get_vocab_size()
 
-
-    def log_run_arguments(self):
-        '''
-        Save the command-line arguments, along with the method defaults,
-        used to parameterise this run.
-        '''
-        logger.info("Run arguments:")
-        for arg, value in self.args.__dict__.iteritems():
-            logger.info("%s: %s" % (arg, str(value)))
-
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(
-        description="Train an neural image description model")
+    parser = argparse.ArgumentParser(description="Randomly sweep through some\
+            hyperparameters for your model.")
 
     # General options
     parser.add_argument("--run_string", default="", type=str,
@@ -186,10 +163,6 @@ if __name__ == "__main__":
     parser.add_argument("--source_type", type=str, default=None,
                         help="Source features over gold or predicted tokens?\
                         Expects 'gold' or 'predicted'. Required")
-    parser.add_argument("--source_merge", type=str, default="sum",
-                        help="How to merge source features. Only applies if \
-                        there are multiple feature vectors. Expects 'sum', \
-                        'avg', or 'concat'.")
 
     # Model hyperparameters
     parser.add_argument("--batch_size", default=100, type=int)
@@ -256,6 +229,20 @@ if __name__ == "__main__":
                         activations over oracle inputs or from predicted\
                         inputs? Default = False ( == Oracle)")
 
+    # Random parameter sweep options
+    parser.add_argument("--num_sweeps", type=int, default=100,
+                        help="Number of different random initialisations to\
+                        use for the hyperparameter search. More means it will\
+                        take you longer to finish the sweep but it will be a\
+                        better reflection of the parameter space. (Default =\
+                        100).")
+    parser.add_argument("--min_lr", type=float, default=-3)
+    parser.add_argument("--max_lr", type=float, default=0)
+    parser.add_argument("--min_l2", type=float, default=-3)
+    parser.add_argument("--max_l2", type=float, default=0)
+    parser.add_argument("--min_dropin", type=float, default=0)
+    parser.add_argument("--max_dropin", type=float, default=0.5)
+
     arguments = parser.parse_args()
 
     if arguments.source_vectors is not None:
@@ -268,5 +255,5 @@ if __name__ == "__main__":
         np.random.seed(1234)
 
     import theano
-    model = GroundedTranslation(arguments)
-    model.train_model()
+    sweep = Sweep(arguments)
+    sweep.random_sweep()
