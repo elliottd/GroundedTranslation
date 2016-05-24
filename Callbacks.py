@@ -102,13 +102,15 @@ class CompilationOfCallbacks(Callback):
 
     def early_stop_decision(self, epoch, val_bleu, val_pplx):
         '''
-        Stop training if validation BLEU score has not increased for
-        --patience epochs.
+	Stop training if validation PPLX has stopped decreasing and
+	validation BLEU score has not increased for --patience epochs.
 
         WARNING: quits with sys.exit(0).
         '''
 
-        if val_bleu > self.best_val_bleu or self.args.no_early_stopping:
+	if val_pplx < self.best_val_pplx:
+	    self.wait = 0
+        elif val_bleu > self.best_val_bleu or self.args.no_early_stopping:
             self.wait = 0
         else:
             self.wait += 1
