@@ -25,7 +25,7 @@ logger = logging.getLogger(__name__)
 
 # Dimensionality of image feature vector
 IMG_FEATS = 4096
-MULTEVAL_DIR = 'multeval-0.5.1'
+MULTEVAL_DIR = '../multeval-0.5.1' if "util" in os.getcwd() else "multeval-0.5.1"
 
 class cd:
     """Context manager for changing the current working directory"""
@@ -100,8 +100,9 @@ class GroundedTranslationGenerator:
             if self.args.multeval:
                 score, _, _ = self.multeval_scores(self.args.checkpoint,
                                                     val=not self.args.test)
-            self.build_model(generate=False)
-            self.calculate_pplx(self.args.checkpoint, val=not self.args.test)
+            if not self.args.no_pplx:
+                self.build_model(generate=False)
+                self.calculate_pplx(self.args.checkpoint, val=not self.args.test)
             return score
 
     def generate_sentences(self, filepath, val=True):
@@ -500,7 +501,8 @@ class GroundedTranslationGenerator:
                 ['./multeval.sh eval --refs ../%s/%s_reference.* \
                  --hyps-baseline ../%s/%sGenerated \
                  --meteor.language de \
-                 2> multevaloutput 1> multevaloutput'
+		 --threads 4 \
+		2> multevaloutput 1> multevaloutput'
                 % (directory, prefix, directory, prefix)], shell=True)
             handle = open("multevaloutput")
             multdata = handle.readlines()
@@ -511,7 +513,7 @@ class GroundedTranslationGenerator:
                 mbleu = mbleu.replace("\n","")
                 mbleu = mbleu.strip()
                 lr = mbleu.split(".")
-                mbleu = lr[0]+"."+lr[1][0:2]
+                mbleu = float(lr[0]+"."+lr[1][0:2])
               if line.startswith("RESULT: baseline: METEOR: AVG:"):
                 mmeteor = line.split(":")[4]
                 mmeteor = mmeteor.replace("\n","")
@@ -523,9 +525,10 @@ class GroundedTranslationGenerator:
                 mter = mter.replace("\n","")
                 mter = mter.strip()
                 lr = mter.split(".")
-                mter = lr[0]+"."+lr[1][0:2]
+                mter = float(lr[0]+"."+lr[1][0:2])
 
-            logger.info("Meteor = %.2f", mmeteor)
+            logger.info("Meteor = %.2f | BLEU = %.2f | TER = %.2f", 
+			mmeteor, mbleu, mter)
 
             return mmeteor, mbleu, mter
 
@@ -694,6 +697,8 @@ if __name__ == "__main__":
                         decoding process. (Default = False)")
     parser.add_argument("--multeval", action="store_true",
                         help="Evaluate using multeval?")
+    parser.add_argument("--no_pplx", action="store_true",
+			help="Skip perplexity calculation?")
 
     # Legacy options
     parser.add_argument("--generate_from_N_words", type=int, default=0,

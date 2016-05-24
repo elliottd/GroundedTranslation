@@ -58,7 +58,7 @@ class TimestepsAndBeamSearch(object):
         handle.close()
         run = 0
         for t in xrange(self.args.min_timesteps, self.args.max_timesteps+1):
-            for b in xrange(self.args.min_beam, self.args.max_beam+1):
+            for b in xrange(self.args.min_beam, self.args.max_beam+1, 1):
                 handle = open("../logs/timesteps-%s.log" % self.args.run_string, "a")
 
                 logger.info("Setting generation_timesteps to: %d", t)
@@ -192,6 +192,10 @@ if __name__ == "__main__":
                         help="Verbose output while decoding? If you choose\
                         verbose output then you'll see the total beam search\
                         decoding process. (Default = False)")
+    parser.add_argument("--multeval", action="store_true",
+                        help="Evaluate using multeval?")
+    parser.add_argument("--no_pplx", action="store_true",
+			help="Skip perplexity calculation?")
 
     # Legacy options
     parser.add_argument("--generate_from_N_words", type=int, default=0,
