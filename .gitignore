@@ -4,3 +4,4 @@ venv/*
 data/*
 logs/*
 *.sh
+multeval*
