@@ -172,7 +172,8 @@ class VisualWordDataGenerator(object):
                     description = self.dataset[split][ident]['descriptions'][desc_idx]
                     img_feats = self.get_image_features(self.dataset, split, ident)
                     try:
-                        description_array = self.format_sequence(description.split())
+                        description_array = self.format_sequence(description.split(),
+								 train=True)
                         arrays[0][i] = description_array
                         if self.use_image and self.use_source:
                             if self.args.peeking_source:
@@ -447,7 +448,7 @@ class VisualWordDataGenerator(object):
                                           array.shape[2]))
         return arrays
 
-    def format_sequence(self, sequence, generation=False):
+    def format_sequence(self, sequence, generation=False, train=False):
         """
         Transforms a list of words (sequence) into input matrix
         seq_array of (timesteps, vocab-onehot)
@@ -468,6 +469,12 @@ class VisualWordDataGenerator(object):
         seq_array = np.zeros((self.max_seq_len, len(self.word2index)))
         w_indices = [self.word2index[w] for w in sequence
                      if w in self.word2index]
+
+	if train and self.is_too_long(w_indices):
+		# We don't process training sequences that are too long
+                logger.warning("Skipping '%s' because it is too long" % ' '.join([x for x in sequence]))
+		raise AssertionError
+
         if len(w_indices) > self.actual_max_seq_len:
             self.actual_max_seq_len = len(w_indices)
 
@@ -798,4 +805,17 @@ class VisualWordDataGenerator(object):
                 true_len += len(d)
                 num_sents += 1
         return (true_len/num_sents)
+
+    def is_too_long(self, sequence):
+	"""
+	Determine if a sequence is too long to be included in the training
+	data. Sentences that are too long (--maximum_length) are not processed
+	in the training data. The validation and test data are always
+	processed, regardless of --maxmimum_length.
+	"""
+
+	if len(sequence) > self.args.maximum_length:
+	    return True
+	else:
+	    return False
 

@@ -168,6 +168,9 @@ if __name__ == "__main__":
                         to None)")
     parser.add_argument("--unk", type=int,
                         help="unknown character cut-off. Default=3", default=3)
+    parser.add_argument("--maximum_length", type=int, default=50,
+                        help="Maximum length of sequences permissible\
+			in the training data (Default = 50)")
     parser.add_argument("--existing_vocab", type=str, default="",
                         help="Use an existing vocabulary model to define the\
                         vocabulary and UNKing in this dataset?\
