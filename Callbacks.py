@@ -44,9 +44,6 @@ class CompilationOfCallbacks(Callback):
         self.val_loss = []
         self.best_val_loss = np.inf
 
-        self.val_pplx = []
-        self.best_val_pplx = np.inf
-
         self.val_bleu = []
         self.best_val_bleu = np.NINF
 
@@ -91,24 +88,23 @@ class CompilationOfCallbacks(Callback):
         self.save_run_arguments(path)
 
         # Generate training and val sentences to check for overfitting
-        if self.args.enable_val_pplx:
-            val_pplx = self.calculate_pplx(path)
         self.generate_sentences(path)
         val_bleu = self.__bleu_score__(path)
+        val_loss = logs.get('val_loss')
 
-        self.early_stop_decision(len(self.val_bleu)+1, val_bleu, val_pplx)
-        self.checkpoint_parameters(epoch, logs, path, val_bleu, val_pplx)
+        self.early_stop_decision(len(self.val_bleu)+1, val_bleu, val_loss)
+        self.checkpoint_parameters(epoch, logs, path, val_bleu, val_loss)
         self.log_performance()
 
-    def early_stop_decision(self, epoch, val_bleu, val_pplx):
+    def early_stop_decision(self, epoch, val_bleu, val_loss):
         '''
-	Stop training if validation PPLX has stopped decreasing and
+	Stop training if validation loss has stopped decreasing and
 	validation BLEU score has not increased for --patience epochs.
 
         WARNING: quits with sys.exit(0).
         '''
 
-	if val_pplx < self.best_val_pplx:
+	if val_loss < self.best_val_loss:
 	    self.wait = 0
         elif val_bleu > self.best_val_bleu or self.args.no_early_stopping:
             self.wait = 0
@@ -116,8 +112,8 @@ class CompilationOfCallbacks(Callback):
             self.wait += 1
             if self.wait >= self.patience:
                 # we have exceeded patience
-                if val_pplx > self.best_val_pplx:
-                    # and pplx is no longer decreasing
+                if val_loss > self.best_val_loss:
+                    # and loss is no longer decreasing
                     logger.info("Epoch %d: early stopping", epoch)
                     handle = open("checkpoints/%s/summary"
                                   % self.args.run_string, "a")
@@ -127,53 +123,36 @@ class CompilationOfCallbacks(Callback):
 
     def log_performance(self):
         '''
-        Record model performance so far, based on whether we are tracking
-        validation loss or validation pplx.
+        Record model performance so far, based on validation loss.
         '''
         handle = open("checkpoints/%s/summary" % self.args.run_string, "w")
 
-        for epoch in range(len(self.val_pplx)):
-            if self.args.enable_val_pplx:
-                logger.info("Checkpoint %d | val pplx: %.5f bleu %.2f",
-                            epoch+1, self.val_pplx[epoch],
-                            self.val_bleu[epoch])
-                handle.write("Checkpoint %d | val pplx: %.5f bleu %.2f\n"
-                             % (epoch+1, self.val_pplx[epoch],
-                                self.val_bleu[epoch]))
-            else:
-                logger.info("Checkpoint %d | val loss: %.5f bleu %.2f",
-                            epoch+1, self.val_loss[epoch],
-                            self.val_bleu[epoch])
-                handle.write("Checkpoint %d | val loss: %.5f bleu %.2f\n"
-                             % (epoch+1, self.val_loss[epoch],
-                                self.val_bleu[epoch]))
+        for epoch in range(len(self.val_loss)):
+            logger.info("Checkpoint %d | val loss: %.5f bleu %.2f",
+                        epoch+1, self.val_loss[epoch],
+                        self.val_bleu[epoch])
+            handle.write("Checkpoint %d | val loss: %.5f bleu %.2f\n"
+                         % (epoch+1, self.val_loss[epoch],
+                            self.val_bleu[epoch]))
 
         logger.info("---")  # break up the presentation for clarity
 
         # BLEU is the quickest indicator of performance for our task
-        # but PPLX (2^loss) is our objective function
+        # but loss is our objective function
         best_bleu = np.nanargmax(self.val_bleu)
-        if self.args.enable_val_pplx:
-            best_pplx = np.nanargmin(self.val_pplx)
-            logger.info("Best BLEU: %d | val pplx %.5f bleu %.2f",
-                        best_bleu+1, self.val_pplx[best_bleu],
-                        self.val_bleu[best_bleu])
-            handle.write("Best BLEU: %d | val pplx %.5f bleu %.2f\n"
-                         % (best_bleu+1, self.val_pplx[best_bleu],
-                            self.val_bleu[best_bleu]))
-            logger.info("Best PPLX: %d | val pplx %.5f bleu %.2f",
-                        best_pplx+1, self.val_pplx[best_pplx],
-                        self.val_bleu[best_pplx])
-            handle.write("Best PPLX: %d | val pplx %.5f bleu %.2f\n"
-                         % (best_pplx+1, self.val_pplx[best_pplx],
-                            self.val_bleu[best_pplx]))
-        else:
-            logger.info("Best checkpoint: %d | val loss %.5f bleu %.2f",
-                        best_bleu+1, self.val_loss[best_bleu],
-                        self.val_bleu[best_bleu])
-            handle.write("Best checkpoint: %d | val loss %.5f bleu %.2f"
-                         % (best_bleu+1, self.val_loss[best_bleu],
-                            self.val_bleu[best_bleu]))
+        best_loss = np.nanargmin(self.val_loss)
+        logger.info("Best BLEU: %d | val loss %.5f bleu %.2f",
+                    best_bleu+1, self.val_loss[best_bleu],
+                    self.val_bleu[best_bleu])
+        handle.write("Best BLEU: %d | val loss %.5f bleu %.2f"
+                     % (best_bleu+1, self.val_loss[best_bleu],
+                        self.val_bleu[best_bleu]))
+        logger.info("Best loss: %d | val loss %.5f bleu %.2f",
+                    best_loss+1, self.val_loss[best_loss],
+                    self.val_bleu[best_loss])
+        handle.write("Best loss: %d | val loss %.5f bleu %.2f\n"
+                     % (best_loss+1, self.val_loss[best_loss],
+                        self.val_bleu[best_loss]))
         logger.info("Early stopping marker: wait/patience: %d/%d",
                     self.wait, self.patience)
         handle.write("Early stopping marker: wait/patience: %d/%d\n" %
@@ -194,7 +173,7 @@ class CompilationOfCallbacks(Callback):
 
     def __bleu_score__(self, directory, val=True):
         '''
-        PPLX is only weakly correlated with improvements in BLEU,
+        Loss is only weakly correlated with improvements in BLEU,
         and thus improvements in human judgements. Let's also track
         BLEU score of a subset of generated sentences in the val split
         to decide on early stopping, etc.
@@ -233,7 +212,7 @@ class CompilationOfCallbacks(Callback):
             os.mkdir(filepath)
         except OSError:
             pass  # directory already exists
-        logger.info("In %s ...",filepath)
+        logger.info("\nIn %s ...",filepath)
         return filepath
 
     def save_run_arguments(self, filepath):
@@ -247,7 +226,7 @@ class CompilationOfCallbacks(Callback):
         handle.close()
 
     def checkpoint_parameters(self, epoch, logs, filepath, cur_val_bleu,
-                              cur_val_pplx=0.):
+                              cur_val_loss=0.):
         '''
         We checkpoint the model parameters based on either PPLX reduction or
         BLEU score increase in the validation data. This is driven by the
@@ -256,25 +235,9 @@ class CompilationOfCallbacks(Callback):
 
         weights_path = "%s/weights.hdf5" % filepath
 
-        if self.save_best_only and self.params['do_validation']:
-            cur_val_loss = logs.get('val_loss')
-            self.val_loss.append(cur_val_loss)
-            if cur_val_loss < self.best_val_loss:
-                self.best_val_loss = cur_val_loss
-
-            #logger.info("Checkpoint %d: | val loss %0.5f (best: %0.5f) bleu %0.2f (best %0.2f)", 
-            #            (len(self.val_loss) + 1),
-            #            cur_val_loss, self.best_val_loss, cur_val_bleu,
-            #            self.best_val_bleu)
-
-        if self.args.enable_val_pplx:
-            #logger.info("Checkpoint %d: | val pplx %0.5f (best: %0.5f) bleu %0.2f (best %0.2f)", 
-            #            (len(self.val_pplx) + 1),
-            #            cur_val_pplx, self.best_val_pplx, cur_val_bleu,
-            #            self.best_val_bleu)
-            self.val_pplx.append(cur_val_pplx)
-            if cur_val_pplx < self.best_val_pplx:
-                self.best_val_pplx = cur_val_pplx
+        self.val_loss.append(cur_val_loss)
+        if cur_val_loss < self.best_val_loss:
+            self.best_val_loss = cur_val_loss
 
         # save the weights anyway for debug purposes
         self.model.save_weights(weights_path, overwrite=True)
@@ -384,53 +347,18 @@ class CompilationOfCallbacks(Callback):
                 handle.write(decoded_str + "\n")
 
             seen += text.shape[0]
-            if seen == self.data_generator.split_sizes['val']:
+            if seen >= self.data_generator.split_sizes['val']:
                 # Hacky way to break out of the generator
                 break
         handle.close()
 
-    def calculate_pplx_old(self, path, val=True):
-        """ Without batching. Robust against multiple descriptions/image,
-        since it uses data_generator.get_data_by_split input. 
-        We ignore OOV tokens, in line with other toolkits. See (D1) e.g.
-        http://www.speech.sri.com/projects/srilm/manpages/srilm-faq.7.html
-
-        Updated to prepare the Y_target data from the raw text instead of
-        bundling it up as a 1-hot vector.
-        """
-        prefix = "val" if val else "test"
-        logger.info("Calculating pplx over %s data", prefix)
-        sum_logprobs = 0.0
-        y_len = 0
-
-        input_data, Y_target = self.data_generator.get_data_by_split(prefix,
-                                       self.use_sourcelang, self.use_image)
-
-        if self.args.debug:
-            tic = time.time()
-
-        preds = self.model.predict({'text': input_data[0],
-                                    'img': input_data[1]}, verbose=0)
-
-        if self.args.debug:
-            logger.info("Forward pass took %f", time.time()-tic)
-
-        for t in range(Y_target.shape[1]):
-            for i in range(Y_target.shape[0]):
-                target_idx = np.argmax(Y_target[i, t])
-                if self.index2word[target_idx] != "<P>":
-                    log_p = math.log(preds['output'][i, t, target_idx],2)
-                    sum_logprobs += -log_p
-                    y_len += 1
-
-        norm_logprob = sum_logprobs / y_len
-        pplx = math.pow(2, norm_logprob)
-        logger.info("PPLX: %.4f", pplx)
-        return pplx
-
     def calculate_pplx(self, val=True):
         """ Splits the input data into batches of self.args.batch_size to
-        reduce the memory footprint of holding all of the data in RAM. """
+        reduce the memory footprint of holding all of the data in RAM. 
+
+        We ignore OOV tokens, in line with other toolkits. See (D1) e.g.
+        http://www.speech.sri.com/projects/srilm/manpages/srilm-faq.7.html
+        """
 
         prefix = "val" if val else "test"
         logger.info("Calculating pplx over %s data", prefix)
@@ -458,7 +386,7 @@ class CompilationOfCallbacks(Callback):
                         y_len += 1
 
             seen += data['text'].shape[0]
-            if seen == self.data_generator.split_sizes['val']:
+            if seen >= self.data_generator.split_sizes['val']:
                 # Hacky way to break out of the generator
                 break
 
