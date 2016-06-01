@@ -48,10 +48,6 @@ class VisualWordDataGenerator(object):
         logger.info("Initialising data generator")
         self.args = args_dict
 
-        # size of chucks that the generator should return;
-        # if 0 returns full dataset at once.
-        # self.big_batch_size = args_dict.big_batch_size
-
         # Number of descriptions to return per image.
         self.num_sents = args_dict.num_sents  # default 5 (for flickr8k)
         self.unk = args_dict.unk  # default 5
@@ -472,7 +468,7 @@ class VisualWordDataGenerator(object):
 
 	if train and self.is_too_long(w_indices):
 		# We don't process training sequences that are too long
-                logger.warning("Skipping '%s' because it is too long" % ' '.join([x for x in sequence]))
+                logger.debug("Skipping '%s' because it is too long" % ' '.join([x for x in sequence]))
 		raise AssertionError
 
         if len(w_indices) > self.actual_max_seq_len:
@@ -496,7 +492,7 @@ class VisualWordDataGenerator(object):
                 #
                 # we don't encode this sentence because [BOS, EOS] doesn't
                 # make sense
-                logger.warning("Skipping '%s' because none of its words appear in the vocabulary" % ' '.join([x for x in sequence]))
+                logger.debug("Skipping '%s' because none of its words appear in the vocabulary" % ' '.join([x for x in sequence]))
                 raise AssertionError
         seq_array[len(w_indices) + 1, self.word2index[EOS]] += 1
         return seq_array
@@ -570,7 +566,7 @@ class VisualWordDataGenerator(object):
             # this image -- description pair doesn't have a source-language
             # vector. Raise a KeyError so the requester can deal with the
             # missing data.
-            logger.warning("Skipping '%s' because it doesn't have a source vector", data_key)
+            logger.debug("Skipping '%s' because it doesn't have a source vector", data_key)
             raise KeyError
 
     def get_image_features(self, dataset, split, data_key):
@@ -744,12 +740,21 @@ class VisualWordDataGenerator(object):
                 for data_key in dataset[split]:
                     for idx, description in enumerate(dataset[split][data_key]['descriptions'][0:self.args.num_sents]):
                         w_indices = [self.word2index[w] for w in description.split() if w in self.word2index]
-                        if len(w_indices) != 0:
-                            self.split_sizes[split] += 1
-                        else:
-                            logger.warning("Skipping [%s][%s] ('%s') because\
-                            none of its words appear in the vocabulary",
+			if split == "train" and self.is_too_long(w_indices):
+                            logger.debug("Skipping [%s][%s] ('%s') because\
+                            it contains too many words",
                             data_key, idx, description)
+			    continue
+
+			if split == "train":
+			    if len(w_indices) != 0:
+                                self.split_sizes[split] += 1
+                            else:
+                                logger.debug("Skipping [%s][%s] ('%s') because\
+                                none of its words appear in the vocabulary",
+                                data_key, idx, description)
+			else:
+			    self.split_sizes[split] += 1
 
     def corpus_statistics(self):
         """
