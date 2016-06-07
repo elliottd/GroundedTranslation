@@ -310,34 +310,6 @@ class CompilationOfCallbacks(Callback):
             optimiser_params.write("%s: %s\n" % (key, value))
         optimiser_params.close()
 
-    def yield_chunks(self, len_split_indices, batch_size):
-        '''
-        self.args.batch_size is not always cleanly divisible by the number of
-        items in the split, so we need to always yield the correct number of
-        items.
-        '''
-        for i in xrange(0, len_split_indices, batch_size):
-            # yield split_indices[i:i+batch_size]
-            yield (i, i+batch_size-1)
-
-    def make_generation_arrays(self, prefix, fixed_words, generation=False):
-        """Create arrays that are used as input for generation. """
-
-        input_data =\
-            self.data_generator.get_generation_data_by_split(prefix,
-                                self.use_sourcelang, self.use_image)
-
-        # Replace input words (input_data[0]) with zeros for generation,
-        # except for the first args.generate_from_N_words
-        # NOTE: this will include padding and BOS steps (fixed_words has been
-        # incremented accordingly already in generate_sentences().)
-        logger.info("Initialising with the first %d gold words (incl BOS)",
-                    fixed_words)
-        gen_input_data = deepcopy(input_data)
-        gen_input_data[0][:, fixed_words:, :] = 0
-
-        return gen_input_data
-
     def reset_text_arrays(self, text_arrays, fixed_words=1):
         """ Reset the values in the text data structure to zero so we cannot
         accidentally pass them into the model """
