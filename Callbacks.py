@@ -28,7 +28,21 @@ logger = logging.getLogger(__name__)
 # Dimensionality of image feature vector
 IMG_FEATS = 4096
 HSN_SIZE = 409
+MULTEVAL_DIR = '../multeval-0.5.1' if "util" in os.getcwd() else "multeval-0.5.1"
 
+
+class cd:
+    """Context manager for changing the current working directory"""
+    """http://stackoverflow.com/questions/431684/how-do-i-cd-in-python"""
+    def __init__(self, newPath):
+        self.newPath = newPath
+
+    def __enter__(self):
+        self.savedPath = os.getcwd()
+        os.chdir(self.newPath)
+
+    def __exit__(self, etype, value, traceback):
+        os.chdir(self.savedPath)
 
 class CompilationOfCallbacks(Callback):
     """ Collection of compiled callbacks."""
@@ -44,8 +58,8 @@ class CompilationOfCallbacks(Callback):
         self.val_loss = []
         self.best_val_loss = np.inf
 
-        self.val_bleu = []
-        self.best_val_bleu = np.NINF
+        self.val_metric = []
+        self.best_val_metric = np.NINF
 
         self.word2index = word2index
         self.index2word = index2word
@@ -79,7 +93,7 @@ class CompilationOfCallbacks(Callback):
           1. create a directory to checkpoint data
           2. save the arguments used to initialise the run
           3. generate N sentences in the val data by sampling from the model
-          4. calculate BLEU score of the generated sentences
+          4. calculate metric score of the generated sentences
           5. determine whether to stop training and sys.exit(0)
           6. save the model parameters using BLEU
         '''
@@ -89,24 +103,26 @@ class CompilationOfCallbacks(Callback):
 
         # Generate training and val sentences to check for overfitting
         self.generate_sentences(path)
-        val_bleu = self.__bleu_score__(path)
+        meteor, bleu, ter = self.multeval_scores(path)
         val_loss = logs.get('val_loss')
 
-        self.early_stop_decision(len(self.val_bleu)+1, val_bleu, val_loss)
-        self.checkpoint_parameters(epoch, logs, path, val_bleu, val_loss)
+        self.early_stop_decision(len(self.val_metric)+1, meteor, val_loss)
+        self.checkpoint_parameters(epoch, logs, path, meteor, val_loss)
         self.log_performance()
 
-    def early_stop_decision(self, epoch, val_bleu, val_loss):
+    def early_stop_decision(self, epoch, val_metric, val_loss):
         '''
 	Stop training if validation loss has stopped decreasing and
 	validation BLEU score has not increased for --patience epochs.
 
         WARNING: quits with sys.exit(0).
+
+	TODO: this doesn't yet support early stopping based on TER
         '''
 
 	if val_loss < self.best_val_loss:
 	    self.wait = 0
-        elif val_bleu > self.best_val_bleu or self.args.no_early_stopping:
+        elif val_metric > self.best_val_metric or self.args.no_early_stopping:
             self.wait = 0
         else:
             self.wait += 1
@@ -128,31 +144,28 @@ class CompilationOfCallbacks(Callback):
         handle = open("checkpoints/%s/summary" % self.args.run_string, "w")
 
         for epoch in range(len(self.val_loss)):
-            logger.info("Checkpoint %d | val loss: %.5f bleu %.2f",
-                        epoch+1, self.val_loss[epoch],
-                        self.val_bleu[epoch])
             handle.write("Checkpoint %d | val loss: %.5f bleu %.2f\n"
                          % (epoch+1, self.val_loss[epoch],
-                            self.val_bleu[epoch]))
+                            self.val_metric[epoch]))
 
         logger.info("---")  # break up the presentation for clarity
 
         # BLEU is the quickest indicator of performance for our task
         # but loss is our objective function
-        best_bleu = np.nanargmax(self.val_bleu)
+        best_bleu = np.nanargmax(self.val_metric)
         best_loss = np.nanargmin(self.val_loss)
-        logger.info("Best BLEU: %d | val loss %.5f bleu %.2f",
+        logger.info("Best Metric: %d | val loss %.5f score %.2f",
                     best_bleu+1, self.val_loss[best_bleu],
-                    self.val_bleu[best_bleu])
-        handle.write("Best BLEU: %d | val loss %.5f bleu %.2f"
+                    self.val_metric[best_bleu])
+        handle.write("Best Metric: %d | val loss %.5f score %.2f\n"
                      % (best_bleu+1, self.val_loss[best_bleu],
-                        self.val_bleu[best_bleu]))
-        logger.info("Best loss: %d | val loss %.5f bleu %.2f",
+                        self.val_metric[best_bleu]))
+        logger.info("Best loss: %d | val loss %.5f score %.2f",
                     best_loss+1, self.val_loss[best_loss],
-                    self.val_bleu[best_loss])
-        handle.write("Best loss: %d | val loss %.5f bleu %.2f\n"
+                    self.val_metric[best_loss])
+        handle.write("Best loss: %d | val loss %.5f score %.2f\n"
                      % (best_loss+1, self.val_loss[best_loss],
-                        self.val_bleu[best_loss]))
+                        self.val_metric[best_loss]))
         logger.info("Early stopping marker: wait/patience: %d/%d",
                     self.wait, self.patience)
         handle.write("Early stopping marker: wait/patience: %d/%d\n" %
@@ -193,6 +206,49 @@ class CompilationOfCallbacks(Callback):
         bleu = float(bleuscore.lstrip())
         return bleu
 
+    def multeval_scores(self, directory, val=True):
+        '''
+        Maybe you want to do early stopping using Meteor, TER, or BLEU?
+        '''
+        prefix = "val" if val else "test"
+        self.extract_references(directory, prefix)
+
+        with cd(MULTEVAL_DIR):
+            subprocess.check_call(
+                ['./multeval.sh eval --refs ../%s/%s_reference.* \
+                 --hyps-baseline ../%s/%sGenerated \
+                 --meteor.language de \
+		 --threads 4 \
+		2> multevaloutput 1> multevaloutput'
+                % (directory, prefix, directory, prefix)], shell=True)
+            handle = open("multevaloutput")
+            multdata = handle.readlines()
+            handle.close()
+            for line in multdata:
+              if line.startswith("RESULT: baseline: BLEU: AVG:"):
+                mbleu = line.split(":")[4]
+                mbleu = mbleu.replace("\n","")
+                mbleu = mbleu.strip()
+                lr = mbleu.split(".")
+                mbleu = float(lr[0]+"."+lr[1][0:2])
+              if line.startswith("RESULT: baseline: METEOR: AVG:"):
+                mmeteor = line.split(":")[4]
+                mmeteor = mmeteor.replace("\n","")
+                mmeteor = mmeteor.strip()
+                lr = mmeteor.split(".")
+                mmeteor = float(lr[0]+"."+lr[1][0:2])
+              if line.startswith("RESULT: baseline: TER: AVG:"):
+                mter = line.split(":")[4]
+                mter = mter.replace("\n","")
+                mter = mter.strip()
+                lr = mter.split(".")
+                mter = float(lr[0]+"."+lr[1][0:2])
+
+            logger.info("Meteor = %.2f | BLEU = %.2f | TER = %.2f", 
+			mmeteor, mbleu, mter)
+
+            return mmeteor, mbleu, mter
+
     def create_checkpoint_directory(self, savetime):
         '''
         We will create one directory to store all of the epochs data inside.
@@ -200,7 +256,7 @@ class CompilationOfCallbacks(Callback):
         '''
 
         prefix = self.args.run_string if self.args.run_string != "" else ""
-        number = "%03d" % (len(self.val_bleu) + 1)
+        number = "%03d" % (len(self.val_metric) + 1)
         filepath = "checkpoints/%s/%s-%s" % ((prefix, number, savetime))
         try:
             os.mkdir("checkpoints/%s/" % (prefix))
@@ -225,12 +281,14 @@ class CompilationOfCallbacks(Callback):
             handle.write("%s: %s\n" % (arg, str(value)))
         handle.close()
 
-    def checkpoint_parameters(self, epoch, logs, filepath, cur_val_bleu,
+    def checkpoint_parameters(self, epoch, logs, filepath, cur_val_metric,
                               cur_val_loss=0.):
         '''
         We checkpoint the model parameters based on either PPLX reduction or
-        BLEU score increase in the validation data. This is driven by the
+        metric score increase in the validation data. This is driven by the
         user-specified argument self.args.stopping_loss.
+
+	TODO: this doesn't yet support early stopping based on TER
         '''
 
         weights_path = "%s/weights.hdf5" % filepath
@@ -243,9 +301,9 @@ class CompilationOfCallbacks(Callback):
         self.model.save_weights(weights_path, overwrite=True)
 
         # update the best values, if applicable
-        self.val_bleu.append(cur_val_bleu)
-        if cur_val_bleu > self.best_val_bleu:
-            self.best_val_bleu = cur_val_bleu
+        self.val_metric.append(cur_val_metric)
+        if cur_val_metric > self.best_val_metric:
+            self.best_val_metric = cur_val_metric
 
         optimiser_params = open("%s/optimiser_params" % filepath, "w")
         for key, value in self.model.optimizer.get_config().items():
