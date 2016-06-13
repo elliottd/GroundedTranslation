@@ -158,6 +158,11 @@ if __name__ == "__main__":
                         reproding experiments. (default = False)")
     parser.add_argument("--num_sents", default=5, type=int,
                         help="Number of descriptions/image for training")
+    parser.add_argument("--meteor_lang", type=str, required=True,
+                        help="Language of the input dataset. Required for\
+			correct Meteor evaluation. See\
+                        http://www.cs.cmu.edu/~alavie/METEOR/README.html#languages\
+                        for options.")
 
     # Define the types of input data the model will receive
     parser.add_argument("--dataset", default="", type=str, help="Path to the\
@@ -202,9 +207,6 @@ if __name__ == "__main__":
                         help="Prob. of dropping embedding units. Default=0.5")
     parser.add_argument("--gru", action="store_true", help="Use GRU instead\
                         of LSTM recurrent state? (default = False)")
-    parser.add_argument("--big_batch_size", default=10000, type=int,
-                        help="Number of examples to load from disk at a time;\
-                        0 loads entire dataset. Default is 10000")
     parser.add_argument("--mrnn", action="store_true", 
                         help="Use a Mao-style multimodal recurrent neural\
                         network?")

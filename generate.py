@@ -454,7 +454,7 @@ class GroundedTranslationGenerator:
         summary_data = open("%s/summary" % self.args.model_checkpoints).readlines()
         summary_data = [x.replace("\n", "") for x in summary_data]
         best_id = None
-        target = "Best PPLX" if self.args.best_pplx else "Best BLEU"
+        target = "Best loss" if self.args.best_pplx else "Best Metric"
         for line in summary_data:
             if line.startswith(target):
                 best_id = "%03d" % (int(line.split(":")[1].split("|")[0]))
@@ -500,10 +500,10 @@ class GroundedTranslationGenerator:
             subprocess.check_call(
                 ['./multeval.sh eval --refs ../%s/%s_reference.* \
                  --hyps-baseline ../%s/%sGenerated \
-                 --meteor.language de \
+                 --meteor.language %s \
 		 --threads 4 \
 		2> multevaloutput 1> multevaloutput'
-                % (directory, prefix, directory, prefix)], shell=True)
+                % (directory, prefix, directory, prefix, self.args.meteor_lang)], shell=True)
             handle = open("multevaloutput")
             multdata = handle.readlines()
             handle.close()
@@ -614,6 +614,9 @@ if __name__ == "__main__":
                         to None)")
     parser.add_argument("--unk", type=int,
                         help="unknown character cut-off. Default=3", default=3)
+    parser.add_argument("--maximum_length", type=int, default=50,
+                        help="Maximum length of sequences permissible\
+			in the training data (Default = 50)")
     parser.add_argument("--existing_vocab", type=str, default="",
                         help="Use an existing vocabulary model to define the\
                         vocabulary and UNKing in this dataset?\
@@ -697,6 +700,11 @@ if __name__ == "__main__":
                         decoding process. (Default = False)")
     parser.add_argument("--multeval", action="store_true",
                         help="Evaluate using multeval?")
+    parser.add_argument("--meteor_lang", type=str, requried=True,
+                        help="Language of the input dataset. Required for\
+			correct Meteor evaluation. See\
+                        http://www.cs.cmu.edu/~alavie/METEOR/README.html#languages\
+                        for options.")
     parser.add_argument("--no_pplx", action="store_true",
 			help="Skip perplexity calculation?")
 

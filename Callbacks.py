@@ -217,10 +217,10 @@ class CompilationOfCallbacks(Callback):
             subprocess.check_call(
                 ['./multeval.sh eval --refs ../%s/%s_reference.* \
                  --hyps-baseline ../%s/%sGenerated \
-                 --meteor.language de \
+                 --meteor.language %s \
 		 --threads 4 \
 		2> multevaloutput 1> multevaloutput'
-                % (directory, prefix, directory, prefix)], shell=True)
+                % (directory, prefix, directory, prefix, self.args.meteor_lang)], shell=True)
             handle = open("multevaloutput")
             multdata = handle.readlines()
             handle.close()
