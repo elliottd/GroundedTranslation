@@ -700,7 +700,7 @@ if __name__ == "__main__":
                         decoding process. (Default = False)")
     parser.add_argument("--multeval", action="store_true",
                         help="Evaluate using multeval?")
-    parser.add_argument("--meteor_lang", type=str, requried=True,
+    parser.add_argument("--meteor_lang", type=str, required=True,
                         help="Language of the input dataset. Required for\
 			correct Meteor evaluation. See\
                         http://www.cs.cmu.edu/~alavie/METEOR/README.html#languages\
