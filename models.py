@@ -110,13 +110,13 @@ class NIC:
             recurrent_inputs = ['embed_to_hidden',
                                 'i_embed_drop',
                                 's_embed_drop']
-        rnn_input_dim *= 1
+            rnn_input_dim *= 1
         elif use_image:
             recurrent_inputs = ['embed_to_hidden', 'i_embed_drop']
-        rnn_input_dim *= 2
+            rnn_input_dim *= 2
         elif use_sourcelang:
             recurrent_inputs = ['embed_to_hidden', 's_embed_drop']
-        rnn_input_dim *= 2
+            rnn_input_dim *= 2
 
         # Recurrent layer
         if self.gru:
