@@ -218,7 +218,7 @@ class CompilationOfCallbacks(Callback):
                 ['./multeval.sh eval --refs ../%s/%s_reference.* \
                  --hyps-baseline ../%s/%sGenerated \
                  --meteor.language %s \
-		 --threads 4 \
+		 --threads 1 \
 		2> multevaloutput 1> multevaloutput'
                 % (directory, prefix, directory, prefix, self.args.meteor_lang)], shell=True)
             handle = open("multevaloutput")

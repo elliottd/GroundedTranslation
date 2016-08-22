@@ -58,13 +58,20 @@ class NIC:
                                             input_dim=self.vocab_size,
                                             W_regularizer=l2(self.l2reg)),
                                             name="w_embed", input='text_mask')
+        model.add_node(Dropout(self.dropin),
+                       name="w_embed_drop",
+                       input="w_embed")
 
         # Embed -> Hidden
         model.add_node(TimeDistributedDense(output_dim=self.hidden_size,
                                       input_dim=self.vocab_size,
                                       W_regularizer=l2(self.l2reg)),
                                       name='embed_to_hidden',
-                                      input='w_embed')
+                                      input='w_embed_drop')
+        # Dropout here doesn't seem to help
+        #model.add_node(Dropout(self.dropin),
+        #               name="e2h_drop",
+        #               input="embed_to_hidden")
 
         if use_image:
             # Image 'embedding'
@@ -87,7 +94,7 @@ class NIC:
             model.add_node(Masking(mask_value=0.),
                            input='source',
                            name='source_mask')
-	    model.add_node(Activation('relu'), name='s_relu', input='source_mask')
+            model.add_node(Activation('relu'), name='s_relu', input='source_mask')
             model.add_node(TimeDistributedDense(output_dim=self.hidden_size,
                                                 input_dim=self.hsn_size,
                                                 W_regularizer=l2(self.l2reg)),
@@ -97,19 +104,19 @@ class NIC:
                            name="s_embed_drop",
                            input="s_embed")
 
-	rnn_input_dim = self.hidden_size
+        rnn_input_dim = self.hidden_size
         # Input nodes for the recurrent layer
         if use_image and use_sourcelang:
             recurrent_inputs = ['embed_to_hidden',
                                 'i_embed_drop',
                                 's_embed_drop']
-	    rnn_input_dim *= 1
+        rnn_input_dim *= 1
         elif use_image:
             recurrent_inputs = ['embed_to_hidden', 'i_embed_drop']
-	    rnn_input_dim *= 2
+        rnn_input_dim *= 2
         elif use_sourcelang:
             recurrent_inputs = ['embed_to_hidden', 's_embed_drop']
-	    rnn_input_dim *= 2
+        rnn_input_dim *= 2
 
         # Recurrent layer
         if self.gru:

@@ -49,12 +49,14 @@ for idx, image in enumerate(jdata['images']):
   if split == "train":
     container = train.create_group("%06d" % train_counter)
     train_counter += 1
-  if split == "val":
+  elif split == "val":
     container = val.create_group("%06d" % val_counter)
     val_counter += 1
-  if split == "test":
+  elif split == "test":
     container = test.create_group("%06d" % test_counter)
     test_counter += 1
+  else:
+    continue
 
   # The descriptions "Dataset" contains one row per description in unicode
   text_data = container.create_dataset("descriptions", (len(image['sentences']),),
