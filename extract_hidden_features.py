@@ -497,11 +497,6 @@ if __name__ == "__main__":
     parser.add_argument("--init_from_checkpoint", help="Initialise the model\
                         parameters from a pre-defined checkpoint? Useful to\
                         continue training a model.", default=None, type=str)
-    parser.add_argument("--enable_val_pplx", action="store_true",
-                        default=True,
-                        help="Calculate and report smoothed validation pplx\
-                        alongside the Keras objective function loss.\
-                        (default=true)")
     parser.add_argument("--fixed_seed", action="store_true",
                         help="Start with a fixed random seed? Useful for\
                         reproding experiments. (default = False)")

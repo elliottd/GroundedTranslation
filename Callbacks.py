@@ -74,7 +74,7 @@ class CompilationOfCallbacks(Callback):
         self.use_image = use_image
 
         # controversial assignment but it makes it much easier to
-        # perform pplx calculations
+        # do early stopping based on metrics
         self.data_generator = data_generator
 
         # this results in two file handlers for dataset (here and
@@ -382,47 +382,3 @@ class CompilationOfCallbacks(Callback):
                 # Hacky way to break out of the generator
                 break
         handle.close()
-
-    def calculate_pplx(self, val=True):
-        """ Splits the input data into batches of self.args.batch_size to
-        reduce the memory footprint of holding all of the data in RAM. 
-
-        We ignore OOV tokens, in line with other toolkits. See (D1) e.g.
-        http://www.speech.sri.com/projects/srilm/manpages/srilm-faq.7.html
-        """
-
-        prefix = "val" if val else "test"
-        logger.info("Calculating pplx over %s data", prefix)
-        sum_logprobs = 0
-        y_len = 0
-        eps = 1e-31 # teeny tiny number to ensure we never take log(0)
-
-        val_generator = self.data_generator.fixed_generator(prefix)
-        seen = 0
-        for data in val_generator:
-            inputs = data[0]
-            Y_target = deepcopy(data[1]['output'])
-            del data[1]['output']
-
-            preds = self.model.predict(inputs,
-                                       verbose=0,
-                                       batch_size=self.args.batch_size)
-
-            for i in range(Y_target.shape[0]):
-                for t in range(Y_target.shape[1]):
-                    target_idx = np.argmax(Y_target[i, t])
-                    target_tok = self.index2word[target_idx]
-                    if target_tok != "<P>":
-                        p = math.log(preds[i, t, target_idx]+eps,2)
-                        sum_logprobs += -p
-                        y_len += 1
-
-            seen += inputs['text'].shape[0]
-            if seen >= self.data_generator.split_sizes['val']:
-                # Hacky way to break out of the generator
-                break
-
-        norm_logprob = sum_logprobs / y_len
-        pplx = math.pow(2, norm_logprob)
-        logger.info("PPLX: %.4f", pplx)
-        return pplx

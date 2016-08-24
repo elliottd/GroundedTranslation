@@ -589,11 +589,6 @@ if __name__ == "__main__":
                         help="Optional string to help you identify the run")
     parser.add_argument("--debug", action="store_true",
                         help="Print debug messages to stdout?")
-    parser.add_argument("--enable_val_pplx", action="store_true",
-                        default=True,
-                        help="Calculate and report smoothed validation pplx\
-                        alongside the Keras objective function loss.\
-                        (default=true)")
     parser.add_argument("--fixed_seed", action="store_true",
                         help="Start with a fixed random seed? Useful for\
                         reproding experiments. (default = False)")
