@@ -96,99 +96,97 @@ class ExtractFinalHiddenStateActivations:
         '''
         logger.info("%s: extracting final hidden state activations from this model", split)
 
-	# Prepare the data generator based on whether we're going to work with
-	# the gold standard input tokens or the automatically predicted tokens
-	if self.args.use_predicted_tokens:
-	    the_generator = self.data_generator.generation_generator(split=split)
-	else:
-	    the_generator = self.data_generator.fixed_generator(split=split)
+        # Prepare the data generator based on whether we're going to work with
+        # the gold standard input tokens or the automatically predicted tokens
+        if self.args.use_predicted_tokens:
+            the_generator = self.data_generator.generation_generator(split=split)
+        else:
+            the_generator = self.data_generator.fixed_generator(split=split)
 
-	counter = 0
-        if split == 'train':
-            hidden_states = []
-            batch_start = 0
-            batch_end = 0
-            for data in the_generator:
-		if self.args.use_predicted_tokens:
-		    tokens = self.get_predicted_tokens(data)
-                    data['text'] = self.set_text_arrays(tokens, data['text'])
-                print(data['text'].shape)
+        counter = 0
+        hidden_states = []
+        batch_start = 0
+        batch_end = 0
+        for data in the_generator:
+            if self.args.use_predicted_tokens:
+                tokens = self.get_predicted_tokens(data)
+                data[0]['text'] = self.set_text_arrays(tokens, data[0]['text'])
 
-                # We extract the FHS from either the oracle input tokens
-                hsn = self.fhs.predict({'text': data['text'],
-                                        'img': data['img']},
-                                       batch_size=self.args.batch_size,
-                                       verbose=1)
+            # We extract the FHS from either the oracle input tokens
+            hsn = self.fhs.predict({'text': data[0]['text'],
+                                    'img': data[0]['img']}, 
+                                   batch_size=self.args.batch_size,
+                                   verbose=1)
 
-                for idx, h in enumerate(hsn['rnn']):
-                    # get final_hidden index on a sentence-by-sentence
-                    # basis by searching for the first <E> in each trainY
-                    eos = False
-                    for widx, warr in enumerate(data['output'][idx]):
-                        w = np.argmax(warr)
-                        if self.data_generator.index2word[w] == "<E>":
-                            final_hidden = h[widx]
-                            hidden_states.append(final_hidden)
-                            eos = True
-                            logger.debug(widx)
-                            break
-                    if not eos:
-                        final_hidden = h[self.MAX_HT]
+            for idx, h in enumerate(hsn):
+                # get final_hidden index on a sentence-by-sentence
+                # basis by searching for the first <E> in each trainY
+                eos = False
+                for widx, warr in enumerate(data[1]['output'][idx]):
+                    w = np.argmax(warr)
+                    if self.data_generator.index2word[w] == "<E>":
+                        final_hidden = h[widx]
                         hidden_states.append(final_hidden)
-                    batch_end += 1
+                        eos = True
+                        logger.debug(widx)
+                        break
+                if not eos:
+                    final_hidden = h[self.MAX_HT]
+                    hidden_states.append(final_hidden)
+                batch_end += 1
 
-                # Note: serialisation happens over training batches too.
-                # now serialise the hidden representations in the h5
-                self.to_h5_indices(split, data['indices'], hidden_states)
+            # Note: serialisation happens over training batches too.
+            # now serialise the hidden representations in the h5
+            self.to_h5_indices(split, data[0]['indices'], hidden_states)
 
-                batch_start = batch_end
-		counter += len(hidden_states)
-                hidden_states = []
-		logger.info("Processed %d instances" % counter)
-                if batch_end >= self.data_generator.split_sizes[split]:
-                    break
-
-        elif split == 'val' or split == "test":
+            batch_start = batch_end
+            counter += len(hidden_states)
             hidden_states = []
-            batch_start = 0
-            batch_end = 0
-            for data in the_generator:
-		if self.args.use_predicted_tokens:
-		    tokens = self.get_predicted_tokens(data)
-                    data['text'] = self.set_text_arrays(tokens, data['text'])
+            logger.info("Processed %d instances" % counter)
+            if batch_end >= self.data_generator.split_sizes[split]:
+                break
 
-                # We extract the FHS from either the oracle input tokens
-                hsn = self.fhs.predict({'text': data['text'],
-                                        'img': data['img']},
-                                       batch_size=self.args.batch_size,
-                                       verbose=1)
-
-                for idx, h in enumerate(hsn['rnn']):
-                    # get final_hidden index on a sentence-by-sentence
-                    # basis by searching for the first <E> in each trainY
-                    eos = False
-                    for widx, warr in enumerate(data['output'][idx]):
-                        w = np.argmax(warr)
-                        if self.data_generator.index2word[w] == "<E>":
-                            final_hidden = h[widx]
-                            hidden_states.append(final_hidden)
-                            eos = True
-                            break
-                    if not eos:
-                        final_hidden = h[self.MAX_HT]
-                        hidden_states.append(final_hidden)
-                    batch_end += 1
-
-                # Note: serialisation happens over training batches too.
-                # now serialise the hidden representations in the h5
-                self.to_h5_indices(split, data['indices'], hidden_states)
-
-                batch_start = batch_end
-		counter += len(hidden_states)
-                hidden_states = []
-		logger.info("Processed %d instances" % counter)
-                if batch_end >= self.data_generator.split_sizes[split]:
-                    break
+#        elif split == 'val' or split == "test":
+#            hidden_states = []
+#            batch_start = 0
+#            batch_end = 0
+#            for data in the_generator:
+#		if self.args.use_predicted_tokens:
+#		    tokens = self.get_predicted_tokens(data)
+#                    data['text'] = self.set_text_arrays(tokens, data['text'])
+#
+#                # We extract the FHS from either the oracle input tokens
+#                hsn = self.fhs.predict({'text': data['text'],
+#                                        'img': data['img']},
+#                                       batch_size=self.args.batch_size,
+#                                       verbose=1)
+#
+#                for idx, h in enumerate(hsn['rnn']):
+#                    # get final_hidden index on a sentence-by-sentence
+#                    # basis by searching for the first <E> in each trainY
+#                    eos = False
+#                    for widx, warr in enumerate(data['output'][idx]):
+#                        w = np.argmax(warr)
+#                        if self.data_generator.index2word[w] == "<E>":
+#                            final_hidden = h[widx]
+#                            hidden_states.append(final_hidden)
+#                            eos = True
+#                            break
+#                    if not eos:
+#                        final_hidden = h[self.MAX_HT]
+#                        hidden_states.append(final_hidden)
+#                    batch_end += 1
+#
+#                # Note: serialisation happens over training batches too.
+#                # now serialise the hidden representations in the h5
+#                self.to_h5_indices(split, data['indices'], hidden_states)
+#
+#                batch_start = batch_end
+#		counter += len(hidden_states)
+#                hidden_states = []
+#		logger.info("Processed %d instances" % counter)
+#                if batch_end >= self.data_generator.split_sizes[split]:
+#                    break
 
     def get_predicted_tokens(self, data):
         """
@@ -262,205 +260,92 @@ class ExtractFinalHiddenStateActivations:
         reset_arrays[:,fixed_words:, :] = 0
         return reset_arrays
 
-    def generate_activations(self, split):
-        '''
-        Generate and serialise final-timestep hidden state activations
-        into --dataset.
-        TODO: we should be able to serialise predicted final states instead of
-        gold-standard final states for val and test data.
-        '''
-        logger.info("%s: extracting final hidden state activations from this model", split)
-
-        if split == 'train':
-            """ WARNING: This collects the *entirety of the training data* in
-            hidden_states, so should not be used on non-toy training data.
-            """
-            hidden_states = []
-            batch_start = 0
-            batch_end = 0
-            for train_input, trainY, indicator, keys in\
-                self.data_generator.yield_training_batch(self.args.big_batch_size,
-                                                         self.use_sourcelang,
-                                                         self.use_image,
-                                                         return_keys=True):
-
-                if self.args.use_predicted_tokens is True and\
-                    self.args.no_image is False:
-                    # Reset the word indices and then generate the
-                    # descriptions of the images from scratch
-                    fixed_words = self.args.generate_from_N_words + 1
-                    train_input[0][:, fixed_words:, :] = 0
-                    predicted_words = self.generate_sentences(split,
-                                                              arrays=train_input)
-                    self.sentences_to_h5_keys(split, keys, predicted_words)
-
-                    # TODO: code duplication from make_generation_arrays
-                    pred_inputs = deepcopy(train_input)
-                    tokens = pred_inputs[0]
-                    tokens[:, fixed_words, :] = 0  # reset the inputs
-                    for prediction, words in zip(predicted_words, tokens):
-                        for idx, t in enumerate(prediction):
-                            words[idx, self.data_generator.word2index[t]] = 1.
-                    trainY = self.data_generator.get_target_descriptions(tokens)
-
-                    hsn = self.fhs.predict(train_input,
-                                           batch_size=self.args.batch_size,
-                                           verbose=1)
-
-                else:
-                    # We extract the FHS from oracle training input tokens
-                    hsn = self.fhs.predict(train_input,
-                                           batch_size=self.args.batch_size,
-                                           verbose=1)
-
-                logger.info(len(hsn))
-                for idx, h in enumerate(hsn):
-                    # get final_hidden index on a sentence-by-sentence
-                    # basis by searching for the first <E> in each trainY
-                    eos = False
-                    for widx, warr in enumerate(trainY[idx]):
-                        w = np.argmax(warr)
-                        if self.data_generator.index2word[w] == "<E>":
-                            final_hidden = h[widx]
-                            hidden_states.append(final_hidden)
-                            eos = True
-                            break
-                    if not eos:
-                        final_hidden = h[30]
-                        hidden_states.append(final_hidden)
-                    batch_end += 1
-                logger.info(len(hidden_states))
-
-                # Note: serialisation happens over training batches too.
-                # now serialise the hidden representations in the h5
-                #self.serialise_to_h5(split, len(hidden_states[0]), hidden_states,
-                #                     batch_start, batch_end)
-                # KEYS ARE OVER IMAGES NOT DESCRIPTIONS
-                # THIS WILL BREAK IF THERE ARE MULTIPLE DESCRIPTIONS/IMAGE
-                self.serialise_to_h5_keys(split, keys, hidden_states,
-                                          batch_start, batch_end)
-
-                batch_start = batch_end
-                hidden_states = []
-
-        elif split == 'val' or split == "test":
-            # TODO: get keys and do serialise_to_h5 with keys.
-            inputs, Ys = self.data_generator.get_data_by_split(split,
-                                      self.use_sourcelang, self.use_image)
-            hidden_states = []
-            # We can extract the FGS from either oracle or predicted word
-            # sequences for val  / test data .
-            if self.args.use_predicted_tokens is True and self.args.no_image is False:
-                predicted_words = self.generate_sentences(split)
-                self.sentences_to_h5(split, predicted_words)
-                inputs, Ys = self.make_generation_arrays(split,
-                                         self.args.generate_from_N_words,
-                                         predicted_tokens=predicted_words)
-
-            hsn = self.fhs.predict(inputs,
-                                   batch_size=self.args.batch_size,
-                                   verbose=1)
-
-            for idx, h in enumerate(hsn):
-                # get final_hidden index on a sentence-by-sentence
-                # basis by searching for the first <E> in each trainY
-                for widx, warr in enumerate(Ys[idx]):
-                    w = np.argmax(warr)
-                    if self.data_generator.index2word[w] == "<E>":
-                        logger.debug("Sentence length %d", widx)
-                        final_hidden = h[widx]
-                        hidden_states.append(final_hidden)
-                        break
-
-            # now serialise the hidden representations in the h5
-            self.serialise_to_h5(split, len(hidden_states[0]), hidden_states)
-
-    def make_generation_arrays(self, prefix, fixed_words,
-                               predicted_tokens=None):
-        '''
-        Create arrays that are used as input for generation / activation.
-        '''
-
-
-        if predicted_tokens is not None:
-            input_data, targets = self.data_generator.get_data_by_split(prefix,
-                                           self.use_sourcelang, self.use_image)
-            logger.info("Initialising generation arrays with predicted tokens")
-            gen_input_data = deepcopy(input_data)
-            tokens = gen_input_data[0]
-            tokens[:, fixed_words, :] = 0  # reset the inputs
-            for prediction, words, tgt in zip(predicted_tokens, tokens, targets):
-                for idx, t in enumerate(prediction):
-                    words[idx, self.data_generator.word2index[t]] = 1.
-            targets = self.data_generator.get_target_descriptions(tokens)
-            return gen_input_data, targets
-
-        else:
-            # Replace input words (input_data[0]) with zeros for generation,
-            # except for the first args.generate_from_N_words
-            # NOTE: this will include padding and BOS steps (fixed_words has been
-            # incremented accordingly already in generate_sentences().)
-            input_data = self.data_generator.get_generation_data_by_split(prefix,
-                                           self.use_sourcelang, self.use_image)
-            logger.info("Initialising with the first %d gold words (incl BOS)",
-                        fixed_words)
-            gen_input_data = deepcopy(input_data)
-            gen_input_data[0][:, fixed_words:, :] = 0
-            return gen_input_data
-
-    def generate_sentences(self, split, arrays=None):
-        """
-        Generates descriptions of images for --generation_timesteps
-        iterations through the LSTM. Each input description is clipped to
-        the first <BOS> token, or, if --generate_from_N_words is set, to the
-        first N following words (N + 1 BOS token).
-        This process can be additionally conditioned
-        on source language hidden representations, if provided by the
-        --source_vectors parameter.
-        The output is clipped to the first EOS generated, if it exists.
-
-        TODO: beam search
-        TODO: duplicated method with generate.py and Callbacks.py
-        """
-        logger.info("%s: generating descriptions", split)
-
-        start_gen = self.args.generate_from_N_words  # Default 0
-        start_gen = start_gen + 1  # include BOS
-
-        # prepare the datastructures for generation (no batching over val)
-        if arrays == None:
-            arrays = self.make_generation_arrays(split, start_gen)
-        N_sents = arrays[0].shape[0]
-
-        complete_sentences = [[] for _ in range(N_sents)]
-        for t in range(start_gen):  # minimum 1
-            for i in range(N_sents):
-                w = np.argmax(arrays[0][i, t])
-                complete_sentences[i].append(self.data_generator.index2word[w])
-
-        for t in range(start_gen, self.args.generation_timesteps):
-            # we take a view of the datastructures, which means we're only
-            # ever generating a prediction for the next word. This saves a
-            # lot of cycles.
-            preds = self.full_model.predict([arr[:, 0:t] for arr in arrays],
-                                            verbose=0)
-
-            # Look at the last indices for the words.
-            next_word_indices = np.argmax(preds[:, -1], axis=1)
-            # update array[0]/sentence-so-far with generated words.
-            for i in range(N_sents):
-                arrays[0][i, t, next_word_indices[i]] = 1.
-            next_words = [self.data_generator.index2word[x] for x in next_word_indices]
-            for i in range(len(next_words)):
-                complete_sentences[i].append(next_words[i])
-
-        # extract each sentence until it hits the first end-of-string token
-        pruned_sentences = []
-        for s in complete_sentences:
-            pruned_sentences.append([x for x
-                                     in itertools.takewhile(
-                                         lambda n: n != "<E>", s)])
-        return pruned_sentences
+#    def make_generation_arrays(self, prefix, fixed_words,
+#                               predicted_tokens=None):
+#        '''
+#        Create arrays that are used as input for generation / activation.
+#        '''
+#
+#
+#        if predicted_tokens is not None:
+#            input_data, targets = self.data_generator.get_data_by_split(prefix,
+#                                           self.use_sourcelang, self.use_image)
+#            logger.info("Initialising generation arrays with predicted tokens")
+#            gen_input_data = deepcopy(input_data)
+#            tokens = gen_input_data[0]
+#            tokens[:, fixed_words, :] = 0  # reset the inputs
+#            for prediction, words, tgt in zip(predicted_tokens, tokens, targets):
+#                for idx, t in enumerate(prediction):
+#                    words[idx, self.data_generator.word2index[t]] = 1.
+#            targets = self.data_generator.get_target_descriptions(tokens)
+#            return gen_input_data, targets
+#
+#        else:
+#            # Replace input words (input_data[0]) with zeros for generation,
+#            # except for the first args.generate_from_N_words
+#            # NOTE: this will include padding and BOS steps (fixed_words has been
+#            # incremented accordingly already in generate_sentences().)
+#            input_data = self.data_generator.get_generation_data_by_split(prefix,
+#                                           self.use_sourcelang, self.use_image)
+#            logger.info("Initialising with the first %d gold words (incl BOS)",
+#                        fixed_words)
+#            gen_input_data = deepcopy(input_data)
+#            gen_input_data[0][:, fixed_words:, :] = 0
+#            return gen_input_data
+#
+#    def generate_sentences(self, split, arrays=None):
+#        """
+#        Generates descriptions of images for --generation_timesteps
+#        iterations through the LSTM. Each input description is clipped to
+#        the first <BOS> token, or, if --generate_from_N_words is set, to the
+#        first N following words (N + 1 BOS token).
+#        This process can be additionally conditioned
+#        on source language hidden representations, if provided by the
+#        --source_vectors parameter.
+#        The output is clipped to the first EOS generated, if it exists.
+#
+#        TODO: beam search
+#        TODO: duplicated method with generate.py and Callbacks.py
+#        """
+#        logger.info("%s: generating descriptions", split)
+#
+#        start_gen = self.args.generate_from_N_words  # Default 0
+#        start_gen = start_gen + 1  # include BOS
+#
+#        # prepare the datastructures for generation (no batching over val)
+#        if arrays == None:
+#            arrays = self.make_generation_arrays(split, start_gen)
+#        N_sents = arrays[0].shape[0]
+#
+#        complete_sentences = [[] for _ in range(N_sents)]
+#        for t in range(start_gen):  # minimum 1
+#            for i in range(N_sents):
+#                w = np.argmax(arrays[0][i, t])
+#                complete_sentences[i].append(self.data_generator.index2word[w])
+#
+#        for t in range(start_gen, self.args.generation_timesteps):
+#            # we take a view of the datastructures, which means we're only
+#            # ever generating a prediction for the next word. This saves a
+#            # lot of cycles.
+#            preds = self.full_model.predict([arr[:, 0:t] for arr in arrays],
+#                                            verbose=0)
+#
+#            # Look at the last indices for the words.
+#            next_word_indices = np.argmax(preds[:, -1], axis=1)
+#            # update array[0]/sentence-so-far with generated words.
+#            for i in range(N_sents):
+#                arrays[0][i, t, next_word_indices[i]] = 1.
+#            next_words = [self.data_generator.index2word[x] for x in next_word_indices]
+#            for i in range(len(next_words)):
+#                complete_sentences[i].append(next_words[i])
+#
+#        # extract each sentence until it hits the first end-of-string token
+#        pruned_sentences = []
+#        for s in complete_sentences:
+#            pruned_sentences.append([x for x
+#                                     in itertools.takewhile(
+#                                         lambda n: n != "<E>", s)])
+#        return pruned_sentences
 
     def to_h5_indices(self, split, indices, hidden_states):
         hsn_shape = len(hidden_states[0])
@@ -476,102 +361,102 @@ class ExtractFinalHiddenStateActivations:
                                                     hsn_shape,
                                                     desc_idx)
 
-    def serialise_to_h5_keys(self, split, data_keys, hidden_states):
-        hsn_shape = len(hidden_states[0])
-        fhf_str = "final_hidden_features"
-        logger.info("Serialising final hidden state features from %s to H5",
-                    split)
-        for idx, data_key in enumerate(data_keys):
-            self.data_generator.set_source_features(split, data_key,
-                                                    self.h5_dataset_str,
-                                                    hidden_states[idx],
-                                                    hsn_shape)
-            #try:
-            #    hsn_data = self.data_generator.dataset[split][data_key].create_dataset(
-            #        fhf_str, (hsn_shape,), dtype='float32')
-            #except RuntimeError:
-            #    # the dataset already exists, retrieve it into RAM and then overwrite it
-            #    del self.data_generator.dataset[split][data_key][fhf_str]
-            #    hsn_data = self.data_generator.dataset[split][data_key].create_dataset(
-            #        fhf_str, (hsn_shape,), dtype='float32')
-            #try:
-            #    hsn_data[:] = hidden_states[idx]
-            #except IndexError:
-            #    raise IndexError("data_key %s of %s; index idx %d, len hidden %d" % (
-            #        data_key, len(data_keys), idx, len(hidden_states)))
-            #    break
-
-    def sentences_to_h5(self, split, sentences):
-        '''
-        Save the predicted sentences into the h5 dataset object.
-        This is useful for subsequently (i.e. in a different program)
-        extracting LM-only final hidden states from predicted sentences.
-        Specifically, this can be compared to generating LM-only hidden
-        states over gold-standard tokens.
-        '''
-        idx = 0
-        logger.info("Serialising sentences from %s to H5", split)
-        data_keys = self.data_generator.dataset[split]
-        if split == 'val' and self.args.small_val:
-            data_keys = ["%06d" % x for x in range(len(sentences))]
-        else:
-            data_keys = ["%06d" % x for x in range(len(sentences))]
-        for data_key in data_keys:
-            self.data_generator.set_predicted_description(split, data_key,
-                                                          sentences[idx][1:])
-            idx += 1
-
-    def sentences_to_h5_keys(self, split, data_keys, sentences):
-        logger.info("Serialising sentences from %s to H5",
-                    split)
-        for idx, data_key in enumerate(data_keys):
-            self.data_generator.set_predicted_description(split, data_key,
-                                                    sentences[idx])
-
-    def serialise_to_h5(self, split, hsn_shape, hidden_states,
-                        batch_start=None, batch_end=None):
-        """ Serialise the hidden representations from generate_activations
-        into the h5 dataset.
-        This assumes one hidden_state per image key, which is maybe not
-        appropriate if there are multiple descriptions/image.
-        """
-        idx = 0
-        logger.info("Serialising final hidden state features from %s to H5",
-                    split)
-        if batch_start is not None:
-            logger.info("Start at %d, end at %d", batch_start, batch_end)
-            data_keys = ["%06d" % x for x in range(batch_start, batch_end)]
-            assert len(hidden_states) == len(data_keys),\
-                    "keys: %d hidden %d; start %d end %d" % (len(data_keys),
-                                            len(hidden_states), batch_start,
-                                            batch_end)
-        else:
-            data_keys = self.data_generator.dataset[split]
-            if split == 'val' and self.args.small_val:
-                data_keys = ["%06d" % x for x in range(len(hidden_states))]
-            else:
-                data_keys = ["%06d" % x for x in range(len(hidden_states))]
-        for data_key in data_keys:
-            self.data_generator.set_source_features(split, data_key,
-                                                    self.h5_dataset_str,
-                                                    hidden_states[idx],
-                                                    hsn_shape)
-            #try:
-            #    hsn_data = self.data_generator.dataset[split][data_key].create_dataset(
-            #        fhf_str, (hsn_shape,), dtype='float32')
-            #except RuntimeError:
-            #    # the dataset already exists, retrieve it into RAM and then overwrite it
-            #    del self.data_generator.dataset[split][data_key][fhf_str]
-            #    hsn_data = self.data_generator.dataset[split][data_key].create_dataset(
-            #        fhf_str, (hsn_shape,), dtype='float32')
-            #try:
-            #    hsn_data[:] = hidden_states[idx]
-            #except IndexError:
-            #    raise IndexError("data_key %s of %s; index idx %d, len hidden %d" % (
-            #        data_key, len(data_keys),
-            #                      idx, len(hidden_states)))
-            #    break
-            idx += 1
+#    def serialise_to_h5_keys(self, split, data_keys, hidden_states):
+#        hsn_shape = len(hidden_states[0])
+#        fhf_str = "final_hidden_features"
+#        logger.info("Serialising final hidden state features from %s to H5",
+#                    split)
+#        for idx, data_key in enumerate(data_keys):
+#            self.data_generator.set_source_features(split, data_key,
+#                                                    self.h5_dataset_str,
+#                                                    hidden_states[idx],
+#                                                    hsn_shape)
+#            #try:
+#            #    hsn_data = self.data_generator.dataset[split][data_key].create_dataset(
+#            #        fhf_str, (hsn_shape,), dtype='float32')
+#            #except RuntimeError:
+#            #    # the dataset already exists, retrieve it into RAM and then overwrite it
+#            #    del self.data_generator.dataset[split][data_key][fhf_str]
+#            #    hsn_data = self.data_generator.dataset[split][data_key].create_dataset(
+#            #        fhf_str, (hsn_shape,), dtype='float32')
+#            #try:
+#            #    hsn_data[:] = hidden_states[idx]
+#            #except IndexError:
+#            #    raise IndexError("data_key %s of %s; index idx %d, len hidden %d" % (
+#            #        data_key, len(data_keys), idx, len(hidden_states)))
+#            #    break
+#
+#    def sentences_to_h5(self, split, sentences):
+#        '''
+#        Save the predicted sentences into the h5 dataset object.
+#        This is useful for subsequently (i.e. in a different program)
+#        extracting LM-only final hidden states from predicted sentences.
+#        Specifically, this can be compared to generating LM-only hidden
+#        states over gold-standard tokens.
+#        '''
+#        idx = 0
+#        logger.info("Serialising sentences from %s to H5", split)
+#        data_keys = self.data_generator.dataset[split]
+#        if split == 'val' and self.args.small_val:
+#            data_keys = ["%06d" % x for x in range(len(sentences))]
+#        else:
+#            data_keys = ["%06d" % x for x in range(len(sentences))]
+#        for data_key in data_keys:
+#            self.data_generator.set_predicted_description(split, data_key,
+#                                                          sentences[idx][1:])
+#            idx += 1
+#
+#    def sentences_to_h5_keys(self, split, data_keys, sentences):
+#        logger.info("Serialising sentences from %s to H5",
+#                    split)
+#        for idx, data_key in enumerate(data_keys):
+#            self.data_generator.set_predicted_description(split, data_key,
+#                                                    sentences[idx])
+#
+#    def serialise_to_h5(self, split, hsn_shape, hidden_states,
+#                        batch_start=None, batch_end=None):
+#        """ Serialise the hidden representations from generate_activations
+#        into the h5 dataset.
+#        This assumes one hidden_state per image key, which is maybe not
+#        appropriate if there are multiple descriptions/image.
+#        """
+#        idx = 0
+#        logger.info("Serialising final hidden state features from %s to H5",
+#                    split)
+#        if batch_start is not None:
+#            logger.info("Start at %d, end at %d", batch_start, batch_end)
+#            data_keys = ["%06d" % x for x in range(batch_start, batch_end)]
+#            assert len(hidden_states) == len(data_keys),\
+#                    "keys: %d hidden %d; start %d end %d" % (len(data_keys),
+#                                            len(hidden_states), batch_start,
+#                                            batch_end)
+#        else:
+#            data_keys = self.data_generator.dataset[split]
+#            if split == 'val' and self.args.small_val:
+#                data_keys = ["%06d" % x for x in range(len(hidden_states))]
+#            else:
+#                data_keys = ["%06d" % x for x in range(len(hidden_states))]
+#        for data_key in data_keys:
+#            self.data_generator.set_source_features(split, data_key,
+#                                                    self.h5_dataset_str,
+#                                                    hidden_states[idx],
+#                                                    hsn_shape)
+#            #try:
+#            #    hsn_data = self.data_generator.dataset[split][data_key].create_dataset(
+#            #        fhf_str, (hsn_shape,), dtype='float32')
+#            #except RuntimeError:
+#            #    # the dataset already exists, retrieve it into RAM and then overwrite it
+#            #    del self.data_generator.dataset[split][data_key][fhf_str]
+#            #    hsn_data = self.data_generator.dataset[split][data_key].create_dataset(
+#            #        fhf_str, (hsn_shape,), dtype='float32')
+#            #try:
+#            #    hsn_data[:] = hidden_states[idx]
+#            #except IndexError:
+#            #    raise IndexError("data_key %s of %s; index idx %d, len hidden %d" % (
+#            #        data_key, len(data_keys),
+#            #                      idx, len(hidden_states)))
+#            #    break
+#            idx += 1
 
     def find_best_checkpoint(self):
         '''
@@ -585,7 +470,7 @@ class ExtractFinalHiddenStateActivations:
         summary_data = open("%s/summary" % self.args.model_checkpoints).readlines()
         summary_data = [x.replace("\n", "") for x in summary_data]
         best_id = None
-        target = "Best PPLX" if self.args.best_pplx else "Best BLEU"
+        target = "Best loss" if self.args.best_pplx else "Best Metric"
         for line in summary_data:
             if line.startswith(target):
                 best_id = "%03d" % (int(line.split(":")[1].split("|")[0]))

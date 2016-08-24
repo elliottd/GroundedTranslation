@@ -340,7 +340,8 @@ class CompilationOfCallbacks(Callback):
                                                                  in_callbacks=True)
         seen = 0
         for data in val_generator:
-            text = deepcopy(data['text'])
+            inputs = data[0]
+            text = deepcopy(inputs['text'])
             # Append the first start_gen words to the complete_sentences list
             # for each instance in the batch.
             complete_sentences = [[] for _ in range(text.shape[0])]
@@ -348,22 +349,22 @@ class CompilationOfCallbacks(Callback):
                 for i in range(text.shape[0]):
                     w = np.argmax(text[i, t])
                     complete_sentences[i].append(self.index2word[w])
-            del data['text']
+            del inputs['text']
             text = self.reset_text_arrays(text, start_gen)
-            Y_target = data['output']
-            data['text'] = text
+            Y_target = data[1]
+            inputs['text'] = text
 
             for t in range(start_gen, self.args.generation_timesteps):
-                logger.debug("Input token: %s" % self.index2word[np.argmax(data['text'][0,t-1])])
-                preds = self.model.predict(data,
-                                           verbose=0)
+                logger.debug("Input token: %s" % self.index2word[np.argmax(inputs['text'][0,t-1])])
+                preds = self.model.predict(inputs, verbose=0)
 
                 # Look at the last indices for the words.
-                next_word_indices = np.argmax(preds['output'][:, t-1], axis=1)
+                #next_word_indices = np.argmax(preds['output'][:, t-1], axis=1)
+                next_word_indices = np.argmax(preds[:, t-1], axis=1)
                 logger.debug("Predicted token: %s" % self.index2word[next_word_indices[0]])
                 # update array[0]/sentence-so-far with generated words.
                 for i in range(len(next_word_indices)):
-                    data['text'][i, t, next_word_indices[i]] = 1.
+                    inputs['text'][i, t, next_word_indices[i]] = 1.
                 next_words = [self.index2word[x] for x in next_word_indices]
                 for i in range(len(next_words)):
                     complete_sentences[i].append(next_words[i])
@@ -399,10 +400,11 @@ class CompilationOfCallbacks(Callback):
         val_generator = self.data_generator.fixed_generator(prefix)
         seen = 0
         for data in val_generator:
-            Y_target = deepcopy(data['output'])
-            del data['output']
+            inputs = data[0]
+            Y_target = deepcopy(data[1]['output'])
+            del data[1]['output']
 
-            preds = self.model.predict(data,
+            preds = self.model.predict(inputs,
                                        verbose=0,
                                        batch_size=self.args.batch_size)
 
@@ -411,11 +413,11 @@ class CompilationOfCallbacks(Callback):
                     target_idx = np.argmax(Y_target[i, t])
                     target_tok = self.index2word[target_idx]
                     if target_tok != "<P>":
-                        p = math.log(preds['output'][i, t, target_idx]+eps,2)
+                        p = math.log(preds[i, t, target_idx]+eps,2)
                         sum_logprobs += -p
                         y_len += 1
 
-            seen += data['text'].shape[0]
+            seen += inputs['text'].shape[0]
             if seen >= self.data_generator.split_sizes['val']:
                 # Hacky way to break out of the generator
                 break

@@ -414,21 +414,21 @@ class VisualWordDataGenerator(object):
         '''
 
         if self.use_source and self.use_image:
-            return {'text': array[0],
-                    'source': array[1],
+            return [{'text': array[0],
+                    'src': array[1],
                     'img': array[2],
-                    'output': targets,
-                    'indices': indices}
+                    'indices': indices},
+                    {'output': targets}]
         elif self.use_image:
-            return {'text': array[0],
+            return [{'text': array[0],
                     'img': array[1],
-                    'output': targets,
-                    'indices': indices}
+                    'indices': indices},
+                    {'output': targets}]
         elif self.use_source:
-            return {'text': array[0],
-                    'source': array[1],
-                    'output': targets,
-                    'indices': indices}
+            return [{'text': array[0],
+                    'src': array[1],
+                    'indices': indices},
+                    {'output': targets}]
 
     def resize_arrays(self, new_size, arrays):
         """

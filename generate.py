@@ -134,7 +134,7 @@ class GroundedTranslationGenerator:
             # let's do this one sentence at a time to make the logging output
             # easier to understand
             for data in generator:
-                text = data['text']
+                text = data[0]['text']
                 # Append the first start_gen words to the complete_sentences list
                 # for each instance in the batch.
                 complete_sentences = [[] for _ in range(text.shape[0])]
@@ -142,13 +142,13 @@ class GroundedTranslationGenerator:
                     for i in range(text.shape[0]):
                         w = np.argmax(text[i, t])
                         complete_sentences[i].append(self.index2word[w])
-                del data['text']
+                del data[0]['text']
                 text = self.reset_text_arrays(text, start_gen)
-                Y_target = data['output']
-                data['text'] = text
+                Y_target = data[1]['output']
+                data[0]['text'] = text
 
                 max_beam_width = self.args.beam_width
-                structs = self.make_duplicate_matrices(data, max_beam_width)
+                structs = self.make_duplicate_matrices(data[0], max_beam_width)
 
                 # A beam is a 2-tuple with the probability of the sequence and
                 # the words in that sequence. Start with empty beams
@@ -167,7 +167,7 @@ class GroundedTranslationGenerator:
                     preds = self.model.predict(structs, verbose=0)
 
                     # The last indices in preds are the predicted words
-                    next_word_indices = preds['output'][:, t-1]
+                    next_word_indices = preds[:, t-1]
                     sorted_indices = np.argsort(-next_word_indices, axis=1)
 
                     # Each instance in structs is holding the history of a
@@ -222,7 +222,7 @@ class GroundedTranslationGenerator:
 
                     # Reproduce the structs for the beam search so we can keep
                     # track of the state of each beam
-                    structs = self.make_duplicate_matrices(data, max_beam_width)
+                    structs = self.make_duplicate_matrices(data[0], max_beam_width)
 
                     # Rewrite the 1-hot word features with the
                     # so-far-predcicted tokens in a beam.
@@ -278,30 +278,30 @@ class GroundedTranslationGenerator:
             generator = self.data_gen.generation_generator(prefix)
             seen = 0
             for data in generator:
-                text = deepcopy(data['text'])
+                text = deepcopy(data[0]['text'])
                 # Append the first start_gen words to the complete_sentences list
                 # for each instance in the batch.
                 complete_sentences = [[] for _ in range(text.shape[0])]
                 for t in range(start_gen):  # minimum 1
-                    for i in range(text.shape[0]):
+                    for i in range(text .shape[0]):
                         w = np.argmax(text[i, t])
                         complete_sentences[i].append(self.index2word[w])
-                del data['text']
+                del data[0]['text']
                 text = self.reset_text_arrays(text, start_gen)
-                Y_target = data['output']
-                data['text'] = text
+                Y_target = data[1]['output']
+                data[0]['text'] = text
 
                 for t in range(start_gen, self.args.generation_timesteps):
-                    logger.debug("Input token: %s" % self.index2word[np.argmax(data['text'][0,t-1])])
-                    preds = self.model.predict(data,
+                    logger.debug("Input token: %s" % self.index2word[np.argmax(text[0,t-1])])
+                    preds = self.model.predict(data[0],
                                                verbose=0)
 
                     # Look at the last indices for the words.
-                    next_word_indices = np.argmax(preds['output'][:, t-1], axis=1)
+                    next_word_indices = np.argmax(preds[:, t-1], axis=1)
                     logger.debug("Predicted token: %s" % self.index2word[next_word_indices[0]])
                     # update array[0]/sentence-so-far with generated words.
                     for i in range(len(next_word_indices)):
-                        data['text'][i, t, next_word_indices[i]] = 1.
+                        data[0]['text'][i, t, next_word_indices[i]] = 1.
                     next_words = [self.index2word[x] for x in next_word_indices]
                     for i in range(len(next_words)):
                         complete_sentences[i].append(next_words[i])
@@ -337,10 +337,10 @@ class GroundedTranslationGenerator:
         generator = self.data_gen.fixed_generator(prefix)
         seen = 0
         for data in generator:
-            Y_target = deepcopy(data['output'])
-            del data['output']
+            Y_target = deepcopy(data[1]['output'])
+            del data[1]['output']
 
-            preds = self.model.predict(data,
+            preds = self.model.predict(data[0],
                                        verbose=0,
                                        batch_size=self.args.batch_size)
 
@@ -349,11 +349,11 @@ class GroundedTranslationGenerator:
                     target_idx = np.argmax(Y_target[i, t])
                     target_tok = self.index2word[target_idx]
                     if target_tok != "<P>":
-                        log_p = math.log(preds['output'][i, t, target_idx],2)
+                        log_p = math.log(preds[i, t, target_idx],2)
                         sum_logprobs += -log_p
                         y_len += 1
 
-            seen += data['text'].shape[0]
+            seen += data[0]['text'].shape[0]
             if seen == self.data_gen.split_sizes[prefix]:
                 # Hacky way to break out of the generator
                 break

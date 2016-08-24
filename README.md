@@ -7,12 +7,12 @@ This is the source code that accompanies [Multilingual Image Description with Ne
 Dependencies
 ---
 
-* CUDA 6.5.14
-* python 2.7.5
+* CUDA 6.5, 7.0, or 7.5
+* python 2.7
 * numpy 1.91
 * scipy 0.15
-* [Theano 0.7](https://github.com/Theano/Theano/tree/rel-0.7)
-* [Keras 0.1.3](https://github.com/fchollet/keras/tree/0.1.3)
+* [Theano 0.8.2](https://github.com/Theano/Theano/releases/tag/rel-0.8.2)
+* [Keras 1.0.7](https://github.com/fchollet/keras/releases/tag/1.0.7)
 * h5py 2.5.0
 * [dominate](https://github.com/Knio/dominate) to visualise the generated descriptions
 
