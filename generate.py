@@ -391,7 +391,7 @@ class GroundedTranslationGenerator:
             dupes = [[],[],[]]
             words = generator_data['text']
             img = generator_data['img']
-            source = generator_data['source']
+            source = generator_data['src']
             for x in range(k):
                 # Make a deep copy of the word_feats structures 
                 # so the arrays will never be shared
@@ -404,7 +404,7 @@ class GroundedTranslationGenerator:
             dupes[1] = np.array(dupes[1])
             dupes[2] = np.array(dupes[2])
 
-            return {'text': dupes[0], 'img': dupes[2], 'source': dupes[1]}
+            return {'text': dupes[0], 'img': dupes[2], 'src': dupes[1]}
 
         elif self.use_image:
             # the data generator yielded a dictionary with the words and the
@@ -429,7 +429,7 @@ class GroundedTranslationGenerator:
             # source features
             dupes = [[],[]]
             words = generator_data['text']
-            source= generator_data['source']
+            source= generator_data['src']
             for x in range(k):
                 # Make a deep copy of the word_feats structures 
                 # so the arrays will never be shared
@@ -440,7 +440,7 @@ class GroundedTranslationGenerator:
             dupes[0] = np.array(dupes[0])
             dupes[1] = np.array(dupes[1])
 
-            return {'text': dupes[0], 'source': dupes[1]}
+            return {'text': dupes[0], 'src': dupes[1]}
 
     def find_best_checkpoint(self):
         '''

@@ -80,12 +80,17 @@ class VisualWordDataGenerator(object):
                                             "r")
             self.source_encoder = args_dict.source_enc
             self.source_type = args_dict.source_type
-            self.source_dim = args_dict.hidden_size
-            self.h5_dataset_str = "%s-hidden_feats-%s-%d" % (self.source_type,
-                                                      self.source_encoder,
-                                                      self.source_dim)
+            h5_dataset_keys = self.source_dataset['train']['000000'].keys()
+            self.h5_dataset_str = next((z for z in h5_dataset_keys if
+                z.startswith("%s-hidden_feats-%s" % (self.source_type,
+                    self.source_encoder))), None)
+            #self.h5_dataset_str = "%s-hidden_feats-%s-%d" % (self.source_type,
+            #                                          self.source_encoder,
+            #                                          self.source_dim)
+            assert self.h5_dataset_str is not None
             self.hsn_size = len(self.source_dataset['train']['000000']
                                 [self.h5_dataset_str][0])
+            self.source_dim = self.hsn_size
             self.num_hsn = len(self.source_dataset['train']['000000']
                                 [self.h5_dataset_str])
             self.use_source = True
@@ -542,13 +547,9 @@ class VisualWordDataGenerator(object):
         TODO: support a 'concat' mode for merging the source features
         '''
 
-        h5_dataset_str = "%s-hidden_feats-%s-%d" % (self.source_type,
-                                                    self.source_encoder,
-                                                    self.source_dim)
-
         mode = self.args.source_merge
         try:
-            source = self.source_dataset[split][data_key][h5_dataset_str]
+            source = self.source_dataset[split][data_key][self.h5_dataset_str]
             if mode == 'sum' or mode =='avg':
                 return_feats = np.zeros(self.source_dim)
                 for feats in source:
