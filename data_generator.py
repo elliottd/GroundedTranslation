@@ -339,7 +339,8 @@ class VisualWordDataGenerator(object):
             img_feats = self.get_image_features(self.dataset, split, ident)
             try:
                 description_array = self.format_sequence(description.split(),
-                                                         generation=not in_callbacks)
+                                                         generation=not in_callbacks,
+                                                         in_callbacks=in_callbacks)
                 arrays[0][i] = description_array
                 if self.use_image and self.use_source:
                     if self.args.peeking_source:
@@ -449,7 +450,8 @@ class VisualWordDataGenerator(object):
                                           array.shape[2]))
         return arrays
 
-    def format_sequence(self, sequence, generation=False, train=False):
+    def format_sequence(self, sequence, generation=False, train=False,
+            in_callbacks=False):
         """
         Transforms a list of words (sequence) into input matrix
         seq_array of (timesteps, vocab-onehot)
@@ -462,7 +464,8 @@ class VisualWordDataGenerator(object):
         """
 
         if generation:
-            seq_array = np.zeros((self.args.generation_timesteps,
+            timesteps = self.max_seq_len if in_callbacks else self.args.generation_timesteps
+            seq_array = np.zeros((timesteps,
                                   len(self.word2index)))
             seq_array[0, self.word2index[BOS]] = 1 # BOS token at t=0
             return seq_array
@@ -567,7 +570,7 @@ class VisualWordDataGenerator(object):
             # this image -- description pair doesn't have a source-language
             # vector. Raise a KeyError so the requester can deal with the
             # missing data.
-            logger.debug("Skipping '%s' because it doesn't have a source vector", data_key)
+            logger.info("Skipping '%s' because it doesn't have a source vector", data_key)
             raise KeyError
 
     def get_image_features(self, dataset, split, data_key):

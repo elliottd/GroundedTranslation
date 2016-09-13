@@ -334,7 +334,7 @@ class GroundedTranslationGenerator:
         sum_logprobs = 0
         y_len = 0
 
-        generator = self.data_gen.fixed_generator(prefix)
+        generator = self.data_gen.generation_generator(prefix)
         seen = 0
         for data in generator:
             Y_target = deepcopy(data[1]['output'])

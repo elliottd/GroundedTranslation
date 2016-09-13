@@ -134,6 +134,14 @@ class CompilationOfCallbacks(Callback):
                     handle = open("checkpoints/%s/summary"
                                   % self.args.run_string, "a")
                     handle.write("Early stopping because patience exceeded\n")
+                    best_bleu = np.nanargmax(self.val_metric)
+                    best_loss = np.nanargmin(self.val_loss)
+                    logger.info("Best Metric: %d | val loss %.5f score %.2f",
+                                best_bleu+1, self.val_loss[best_bleu],
+                                self.val_metric[best_bleu])
+                    logger.info("Best loss: %d | val loss %.5f score %.2f",
+                                best_loss+1, self.val_loss[best_loss],
+                                self.val_metric[best_loss])
                     handle.close()
                     sys.exit(0)
 
@@ -166,7 +174,7 @@ class CompilationOfCallbacks(Callback):
         handle.write("Best loss: %d | val loss %.5f score %.2f\n"
                      % (best_loss+1, self.val_loss[best_loss],
                         self.val_metric[best_loss]))
-        logger.info("Early stopping marker: wait/patience: %d/%d",
+        logger.info("Early stopping marker: wait/patience: %d/%d\n",
                     self.wait, self.patience)
         handle.write("Early stopping marker: wait/patience: %d/%d\n" %
                      (self.wait, self.patience))
@@ -213,15 +221,27 @@ class CompilationOfCallbacks(Callback):
         prefix = "val" if val else "test"
         self.extract_references(directory, prefix)
 
+        # First you want re-compound the split German words
+        if self.args.meteor_lang == 'de':
+            subprocess.check_call(
+                ["cp %s/%sGenerated %s/%sGenerated.orig" % (directory, prefix,
+                    directory, prefix)], shell=True)
+            subprocess.check_call(
+                ["sed -i -r 's/ @(.*?)@ //g' %s/%sGenerated" % (directory, prefix)], shell=True)
+            subprocess.check_call(
+                ["sed -i -r 's/ @(.*?)@ //g' %s/%s_reference.*" % (directory, prefix)], shell=True)
+
         with cd(MULTEVAL_DIR):
             subprocess.check_call(
                 ['./multeval.sh eval --refs ../%s/%s_reference.* \
                  --hyps-baseline ../%s/%sGenerated \
                  --meteor.language %s \
-		 --threads 1 \
-		2> multevaloutput 1> multevaloutput'
-                % (directory, prefix, directory, prefix, self.args.meteor_lang)], shell=True)
-            handle = open("multevaloutput")
+                 --threads 1 \
+                 2> %s-multevaloutput 1> %s-multevaloutput'
+                % (directory, prefix, directory, prefix,
+                    self.args.meteor_lang, self.args.run_string,
+                    self.args.run_string)], shell=True)
+            handle = open("%s-multevaloutput" % self.args.run_string)
             multdata = handle.readlines()
             handle.close()
             for line in multdata:
