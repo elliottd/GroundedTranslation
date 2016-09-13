@@ -85,7 +85,7 @@ class ExtractFinalHiddenStateActivations:
 
         self.new_generate_activations('train')
         self.new_generate_activations('val')
-        self.new_generate_activations('test')
+        #self.new_generate_activations('test')
 
     def new_generate_activations(self, split):
         '''
@@ -114,9 +114,9 @@ class ExtractFinalHiddenStateActivations:
 
             # We extract the FHS from either the oracle input tokens
             hsn = self.fhs.predict({'text': data[0]['text'],
-                                    'img': data[0]['img']}, 
+                                    'img': data[0]['img']},
                                    batch_size=self.args.batch_size,
-                                   verbose=1)
+                                    verbose=1)
 
             for idx, h in enumerate(hsn):
                 # get final_hidden index on a sentence-by-sentence
@@ -199,7 +199,7 @@ class ExtractFinalHiddenStateActivations:
         # We are going to arg max decode a sequence.
         start_gen = self.args.generate_from_N_words + 1  # include BOS
 
-        text = deepcopy(data['text'])
+        text = deepcopy(data[0]['text'])
         # Append the first start_gen words to the complete_sentences list
         # for each instance in the batch.
         complete_sentences = [[] for _ in range(text.shape[0])]
@@ -207,21 +207,22 @@ class ExtractFinalHiddenStateActivations:
             for i in range(text.shape[0]):
                 w = np.argmax(text[i, t])
                 complete_sentences[i].append(self.data_generator.index2word[w])
-        del data['text']
+        del data[0]['text']
         text = self.reset_text_arrays(text, start_gen)
-        Y_target = data['output']
-        data['text'] = text
+        Y_target = data[1]['output']
+        data[0]['text'] = text
 
         for t in range(start_gen, self.args.generation_timesteps):
-            logger.debug("Input token: %s" % self.data_generator.index2word[np.argmax(data['text'][0,t-1])])
-            preds = self.full_model.predict(data, verbose=0)
+            logger.debug("Input token: %s" %
+                    self.data_generator.index2word[np.argmax(data[0]['text'][0,t-1])])
+            preds = self.full_model.predict(data[0], verbose=0)
 
             # Look at the last indices for the words.
-            next_word_indices = np.argmax(preds['output'][:, t-1], axis=1)
+            next_word_indices = np.argmax(preds[:, t-1], axis=1)
             logger.debug("Predicted token: %s" % self.data_generator.index2word[next_word_indices[0]])
             # update array[0]/sentence-so-far with generated words.
             for i in range(len(next_word_indices)):
-                data['text'][i, t, next_word_indices[i]] = 1.
+                data[0]['text'][i, t, next_word_indices[i]] = 1.
             next_words = [self.data_generator.index2word[x] for x in next_word_indices]
             for i in range(len(next_words)):
                 complete_sentences[i].append(next_words[i])
