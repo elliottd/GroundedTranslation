@@ -64,28 +64,18 @@ class ExtractFinalHiddenStateActivations:
         self.vocab_len = len(self.data_generator.index2word)
         t = self.args.generation_timesteps if self.args.use_predicted_tokens else self.data_generator.max_seq_len
 
-        m = models.NIC(self.args.embed_size, self.args.hidden_size,
-                       self.vocab_len,
-                       self.args.dropin,
-                       self.args.optimiser, self.args.l2reg,
-                       weights=self.args.checkpoint,
-                       gru=self.args.gru,
-                       t=t)
+        args.max_t = t
+        args.vocab = self.vocab_len
+        m = models.NIC(self.args)
 
         self.fhs = m.buildHSNActivations(use_image=self.use_image)
         if self.args.use_predicted_tokens and self.args.no_image == False:
-            gen_m = models.NIC(self.args.embed_size, self.args.hidden_size,
-                               self.vocab_len,
-                               self.args.dropin,
-                               self.args.optimiser, self.args.l2reg,
-                               weights=self.args.checkpoint,
-                               gru=self.args.gru,
-                               t=self.args.generation_timesteps)
+            gen_m = models.NIC(args)
             self.full_model = gen_m.buildKerasModel(use_image=self.use_image)
 
         self.new_generate_activations('train')
         self.new_generate_activations('val')
-        #self.new_generate_activations('test')
+        self.new_generate_activations('test')
 
     def new_generate_activations(self, split):
         '''
@@ -145,48 +135,6 @@ class ExtractFinalHiddenStateActivations:
             logger.info("Processed %d instances" % counter)
             if batch_end >= self.data_generator.split_sizes[split]:
                 break
-
-#        elif split == 'val' or split == "test":
-#            hidden_states = []
-#            batch_start = 0
-#            batch_end = 0
-#            for data in the_generator:
-#		if self.args.use_predicted_tokens:
-#		    tokens = self.get_predicted_tokens(data)
-#                    data['text'] = self.set_text_arrays(tokens, data['text'])
-#
-#                # We extract the FHS from either the oracle input tokens
-#                hsn = self.fhs.predict({'text': data['text'],
-#                                        'img': data['img']},
-#                                       batch_size=self.args.batch_size,
-#                                       verbose=1)
-#
-#                for idx, h in enumerate(hsn['rnn']):
-#                    # get final_hidden index on a sentence-by-sentence
-#                    # basis by searching for the first <E> in each trainY
-#                    eos = False
-#                    for widx, warr in enumerate(data['output'][idx]):
-#                        w = np.argmax(warr)
-#                        if self.data_generator.index2word[w] == "<E>":
-#                            final_hidden = h[widx]
-#                            hidden_states.append(final_hidden)
-#                            eos = True
-#                            break
-#                    if not eos:
-#                        final_hidden = h[self.MAX_HT]
-#                        hidden_states.append(final_hidden)
-#                    batch_end += 1
-#
-#                # Note: serialisation happens over training batches too.
-#                # now serialise the hidden representations in the h5
-#                self.to_h5_indices(split, data['indices'], hidden_states)
-#
-#                batch_start = batch_end
-#		counter += len(hidden_states)
-#                hidden_states = []
-#		logger.info("Processed %d instances" % counter)
-#                if batch_end >= self.data_generator.split_sizes[split]:
-#                    break
 
     def get_predicted_tokens(self, data):
         """
@@ -261,93 +209,6 @@ class ExtractFinalHiddenStateActivations:
         reset_arrays[:,fixed_words:, :] = 0
         return reset_arrays
 
-#    def make_generation_arrays(self, prefix, fixed_words,
-#                               predicted_tokens=None):
-#        '''
-#        Create arrays that are used as input for generation / activation.
-#        '''
-#
-#
-#        if predicted_tokens is not None:
-#            input_data, targets = self.data_generator.get_data_by_split(prefix,
-#                                           self.use_sourcelang, self.use_image)
-#            logger.info("Initialising generation arrays with predicted tokens")
-#            gen_input_data = deepcopy(input_data)
-#            tokens = gen_input_data[0]
-#            tokens[:, fixed_words, :] = 0  # reset the inputs
-#            for prediction, words, tgt in zip(predicted_tokens, tokens, targets):
-#                for idx, t in enumerate(prediction):
-#                    words[idx, self.data_generator.word2index[t]] = 1.
-#            targets = self.data_generator.get_target_descriptions(tokens)
-#            return gen_input_data, targets
-#
-#        else:
-#            # Replace input words (input_data[0]) with zeros for generation,
-#            # except for the first args.generate_from_N_words
-#            # NOTE: this will include padding and BOS steps (fixed_words has been
-#            # incremented accordingly already in generate_sentences().)
-#            input_data = self.data_generator.get_generation_data_by_split(prefix,
-#                                           self.use_sourcelang, self.use_image)
-#            logger.info("Initialising with the first %d gold words (incl BOS)",
-#                        fixed_words)
-#            gen_input_data = deepcopy(input_data)
-#            gen_input_data[0][:, fixed_words:, :] = 0
-#            return gen_input_data
-#
-#    def generate_sentences(self, split, arrays=None):
-#        """
-#        Generates descriptions of images for --generation_timesteps
-#        iterations through the LSTM. Each input description is clipped to
-#        the first <BOS> token, or, if --generate_from_N_words is set, to the
-#        first N following words (N + 1 BOS token).
-#        This process can be additionally conditioned
-#        on source language hidden representations, if provided by the
-#        --source_vectors parameter.
-#        The output is clipped to the first EOS generated, if it exists.
-#
-#        TODO: beam search
-#        TODO: duplicated method with generate.py and Callbacks.py
-#        """
-#        logger.info("%s: generating descriptions", split)
-#
-#        start_gen = self.args.generate_from_N_words  # Default 0
-#        start_gen = start_gen + 1  # include BOS
-#
-#        # prepare the datastructures for generation (no batching over val)
-#        if arrays == None:
-#            arrays = self.make_generation_arrays(split, start_gen)
-#        N_sents = arrays[0].shape[0]
-#
-#        complete_sentences = [[] for _ in range(N_sents)]
-#        for t in range(start_gen):  # minimum 1
-#            for i in range(N_sents):
-#                w = np.argmax(arrays[0][i, t])
-#                complete_sentences[i].append(self.data_generator.index2word[w])
-#
-#        for t in range(start_gen, self.args.generation_timesteps):
-#            # we take a view of the datastructures, which means we're only
-#            # ever generating a prediction for the next word. This saves a
-#            # lot of cycles.
-#            preds = self.full_model.predict([arr[:, 0:t] for arr in arrays],
-#                                            verbose=0)
-#
-#            # Look at the last indices for the words.
-#            next_word_indices = np.argmax(preds[:, -1], axis=1)
-#            # update array[0]/sentence-so-far with generated words.
-#            for i in range(N_sents):
-#                arrays[0][i, t, next_word_indices[i]] = 1.
-#            next_words = [self.data_generator.index2word[x] for x in next_word_indices]
-#            for i in range(len(next_words)):
-#                complete_sentences[i].append(next_words[i])
-#
-#        # extract each sentence until it hits the first end-of-string token
-#        pruned_sentences = []
-#        for s in complete_sentences:
-#            pruned_sentences.append([x for x
-#                                     in itertools.takewhile(
-#                                         lambda n: n != "<E>", s)])
-#        return pruned_sentences
-
     def to_h5_indices(self, split, indices, hidden_states):
         hsn_shape = len(hidden_states[0])
         fhf_str = "final_hidden_features"
@@ -361,103 +222,6 @@ class ExtractFinalHiddenStateActivations:
                                                     hidden_states[idx],
                                                     hsn_shape,
                                                     desc_idx)
-
-#    def serialise_to_h5_keys(self, split, data_keys, hidden_states):
-#        hsn_shape = len(hidden_states[0])
-#        fhf_str = "final_hidden_features"
-#        logger.info("Serialising final hidden state features from %s to H5",
-#                    split)
-#        for idx, data_key in enumerate(data_keys):
-#            self.data_generator.set_source_features(split, data_key,
-#                                                    self.h5_dataset_str,
-#                                                    hidden_states[idx],
-#                                                    hsn_shape)
-#            #try:
-#            #    hsn_data = self.data_generator.dataset[split][data_key].create_dataset(
-#            #        fhf_str, (hsn_shape,), dtype='float32')
-#            #except RuntimeError:
-#            #    # the dataset already exists, retrieve it into RAM and then overwrite it
-#            #    del self.data_generator.dataset[split][data_key][fhf_str]
-#            #    hsn_data = self.data_generator.dataset[split][data_key].create_dataset(
-#            #        fhf_str, (hsn_shape,), dtype='float32')
-#            #try:
-#            #    hsn_data[:] = hidden_states[idx]
-#            #except IndexError:
-#            #    raise IndexError("data_key %s of %s; index idx %d, len hidden %d" % (
-#            #        data_key, len(data_keys), idx, len(hidden_states)))
-#            #    break
-#
-#    def sentences_to_h5(self, split, sentences):
-#        '''
-#        Save the predicted sentences into the h5 dataset object.
-#        This is useful for subsequently (i.e. in a different program)
-#        extracting LM-only final hidden states from predicted sentences.
-#        Specifically, this can be compared to generating LM-only hidden
-#        states over gold-standard tokens.
-#        '''
-#        idx = 0
-#        logger.info("Serialising sentences from %s to H5", split)
-#        data_keys = self.data_generator.dataset[split]
-#        if split == 'val' and self.args.small_val:
-#            data_keys = ["%06d" % x for x in range(len(sentences))]
-#        else:
-#            data_keys = ["%06d" % x for x in range(len(sentences))]
-#        for data_key in data_keys:
-#            self.data_generator.set_predicted_description(split, data_key,
-#                                                          sentences[idx][1:])
-#            idx += 1
-#
-#    def sentences_to_h5_keys(self, split, data_keys, sentences):
-#        logger.info("Serialising sentences from %s to H5",
-#                    split)
-#        for idx, data_key in enumerate(data_keys):
-#            self.data_generator.set_predicted_description(split, data_key,
-#                                                    sentences[idx])
-#
-#    def serialise_to_h5(self, split, hsn_shape, hidden_states,
-#                        batch_start=None, batch_end=None):
-#        """ Serialise the hidden representations from generate_activations
-#        into the h5 dataset.
-#        This assumes one hidden_state per image key, which is maybe not
-#        appropriate if there are multiple descriptions/image.
-#        """
-#        idx = 0
-#        logger.info("Serialising final hidden state features from %s to H5",
-#                    split)
-#        if batch_start is not None:
-#            logger.info("Start at %d, end at %d", batch_start, batch_end)
-#            data_keys = ["%06d" % x for x in range(batch_start, batch_end)]
-#            assert len(hidden_states) == len(data_keys),\
-#                    "keys: %d hidden %d; start %d end %d" % (len(data_keys),
-#                                            len(hidden_states), batch_start,
-#                                            batch_end)
-#        else:
-#            data_keys = self.data_generator.dataset[split]
-#            if split == 'val' and self.args.small_val:
-#                data_keys = ["%06d" % x for x in range(len(hidden_states))]
-#            else:
-#                data_keys = ["%06d" % x for x in range(len(hidden_states))]
-#        for data_key in data_keys:
-#            self.data_generator.set_source_features(split, data_key,
-#                                                    self.h5_dataset_str,
-#                                                    hidden_states[idx],
-#                                                    hsn_shape)
-#            #try:
-#            #    hsn_data = self.data_generator.dataset[split][data_key].create_dataset(
-#            #        fhf_str, (hsn_shape,), dtype='float32')
-#            #except RuntimeError:
-#            #    # the dataset already exists, retrieve it into RAM and then overwrite it
-#            #    del self.data_generator.dataset[split][data_key][fhf_str]
-#            #    hsn_data = self.data_generator.dataset[split][data_key].create_dataset(
-#            #        fhf_str, (hsn_shape,), dtype='float32')
-#            #try:
-#            #    hsn_data[:] = hidden_states[idx]
-#            #except IndexError:
-#            #    raise IndexError("data_key %s of %s; index idx %d, len hidden %d" % (
-#            #        data_key, len(data_keys),
-#            #                      idx, len(hidden_states)))
-#            #    break
-#            idx += 1
 
     def find_best_checkpoint(self):
         '''
@@ -552,12 +316,6 @@ if __name__ == "__main__":
                         help="Prob. of dropping embedding units. Default=0.5")
     parser.add_argument("--gru", action="store_true", help="Use GRU instead\
                         of LSTM recurrent state? (default = False)")
-    parser.add_argument("--mrnn", action="store_true", 
-                        help="Use a Mao-style multimodal recurrent neural\
-                        network?")
-    parser.add_argument("--peeking_source", action="store_true",
-                        help="Input the source features at every timestep?\
-                        Default=False.")
 
     # Optimisation details
     parser.add_argument("--optimiser", default="adam", type=str,

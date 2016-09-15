@@ -35,6 +35,8 @@ class GroundedTranslation(object):
         self.log_run_arguments()
         self.data_generator=datagen
         self.prepare_datagenerator()
+        self.args.max_t = self.data_generator.max_seq_len
+        self.args.vocab_size = self.data_generator.get_vocab_size()
 
         if self.args.debug:
             theano.config.optimizer = 'fast_compile'
@@ -54,11 +56,6 @@ class GroundedTranslation(object):
         losses.history.['val_loss']
         '''
 
-        if not self.use_sourcelang:
-            hsn_size = 0
-        else:
-            hsn_size = self.data_generator.hsn_size  # ick
-
         if self.args.mrnn:
             m = models.MRNN(self.args.embed_size, self.args.hidden_size,
                             self.V, self.args.dropin,
@@ -70,15 +67,7 @@ class GroundedTranslation(object):
                             t=self.data_generator.max_seq_len,
                             lr=self.args.lr)
         else:
-            m = models.NIC(self.args.embed_size, self.args.hidden_size,
-                           self.V, self.args.dropin,
-                           self.args.optimiser, self.args.l2reg,
-                           hsn_size=hsn_size,
-                           weights=self.args.init_from_checkpoint,
-                           gru=self.args.gru,
-                           clipnorm=self.args.clipnorm,
-                           t=self.data_generator.max_seq_len,
-                           lr=self.args.lr)
+            m = models.NIC(self.args)
 
         model = m.buildKerasModel(use_sourcelang=self.use_sourcelang,
                                   use_image=self.use_image)
@@ -124,8 +113,12 @@ class GroundedTranslation(object):
                 self.data_generator.set_vocabulary(self.args.existing_vocab)
             else:
                 self.data_generator.extract_vocabulary()
-        self.V = self.data_generator.get_vocab_size()
+        self.args.vocab_size = self.data_generator.get_vocab_size()
 
+        if not self.use_sourcelang:
+            self.args.source_size = 0
+        else:
+            self.args.source_size = self.data_generator.hsn_size
 
     def log_run_arguments(self):
         '''
@@ -155,9 +148,12 @@ if __name__ == "__main__":
                         help="Number of descriptions/image for training")
     parser.add_argument("--meteor_lang", type=str, required=True,
                         help="Language of the input dataset. Required for\
-			correct Meteor evaluation. See\
+                        correct Meteor evaluation. See\
                         http://www.cs.cmu.edu/~alavie/METEOR/README.html#languages\
                         for options.")
+    parser.add_argument("--transfer_img_emb", type=str, required=False,
+                        help="A pre-trained model from which to transfer the \
+                        weights for embedding the image in the RNN")
 
     # Define the types of input data the model will receive
     parser.add_argument("--dataset", default="", type=str, help="Path to the\
@@ -202,12 +198,8 @@ if __name__ == "__main__":
                         help="Prob. of dropping embedding units. Default=0.5")
     parser.add_argument("--gru", action="store_true", help="Use GRU instead\
                         of LSTM recurrent state? (default = False)")
-    parser.add_argument("--mrnn", action="store_true", 
-                        help="Use a Mao-style multimodal recurrent neural\
-                        network?")
-    parser.add_argument("--peeking_source", action="store_true",
-                        help="Input the source features at every timestep?\
-                        Default=False.")
+    parser.add_argument("--concat", action="store_true",
+                        help="Concatenate the source and visual features?")
 
     # Optimisation details
     parser.add_argument("--optimiser", default="adam", type=str,

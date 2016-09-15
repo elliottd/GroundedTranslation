@@ -173,36 +173,15 @@ class VisualWordDataGenerator(object):
                     description = self.dataset[split][ident]['descriptions'][desc_idx]
                     img_feats = self.get_image_features(self.dataset, split, ident)
                     try:
-                        description_array = self.format_sequence(description.split(),
-								 train=True)
+                        description_array = self.format_sequence(description.split(), train=True)
                         arrays[0][i] = description_array
                         if self.use_image and self.use_source:
-                            if self.args.peeking_source:
-                                arrays[1][i, :] = \
-                                        self.get_source_features(split,
-                                                                 ident)
-                            else:
-                                arrays[1][i, 0] = \
-                                        self.get_source_features(split,
-                                                                 ident)
-                            if self.args.mrnn:
-                                arrays[2][i, :] = img_feats
-                            else:
-                                arrays[2][i, 0] = img_feats
+                            arrays[1][i] = self.get_source_features(split, ident)
+                            arrays[2][i] = img_feats
                         elif self.use_image:
-                            if self.args.mrnn:
-                                arrays[1][i, :] = img_feats
-                            else:
-                                arrays[1][i, 0] = img_feats
+                            arrays[1][i] = img_feats
                         elif self.use_source:
-                            if self.args.peeking_source:
-                                arrays[1][i, :] = \
-                                        self.get_source_features(split,
-                                                                 ident)
-                            else:
-                                arrays[1][i, 0] = \
-                                        self.get_source_features(split,
-                                                                 ident)
+                            arrays[1][i] = self.get_source_features(split, ident)
                         batch_indices.append([ident, desc_idx])
                         i += 1
                     except AssertionError:
@@ -251,35 +230,15 @@ class VisualWordDataGenerator(object):
                     description = self.dataset[split][ident]['descriptions'][desc_idx]
                     img_feats = self.get_image_features(self.dataset, split, ident)
                     try:
-                        description_array = self.format_sequence(description.split())
+                        description_array = self.format_sequence(description.split(), train=True)
                         arrays[0][i] = description_array
                         if self.use_image and self.use_source:
-                            if self.args.peeking_source:
-                                arrays[1][i, :] = \
-                                        self.get_source_features(split,
-                                                                 ident)
-                            else:
-                                arrays[1][i, 0] = \
-                                        self.get_source_features(split,
-                                                                 ident)
-                            if self.args.mrnn:
-                                arrays[2][i, :] = img_feats
-                            else:
-                                arrays[2][i, 0] = img_feats
+                            arrays[1][i] = self.get_source_features(split, ident)
+                            arrays[2][i] = img_feats
                         elif self.use_image:
-                            if self.args.mrnn:
-                                arrays[1][i, :] = img_feats
-                            else:
-                                arrays[1][i, 0] = img_feats
+                            arrays[1][i] = img_feats
                         elif self.use_source:
-                            if self.args.peeking_source:
-                                arrays[1][i, :] = \
-                                        self.get_source_features(split,
-                                                                 ident)
-                            else:
-                                arrays[1][i, 0] = \
-                                        self.get_source_features(split,
-                                                                 ident)
+                            arrays[1][i] = self.get_source_features(split, ident)
                         batch_indices.append([ident, desc_idx])
                         i += 1
                     except AssertionError:
@@ -338,37 +297,15 @@ class VisualWordDataGenerator(object):
             description = self.dataset[split][ident]['descriptions'][desc_idx]
             img_feats = self.get_image_features(self.dataset, split, ident)
             try:
-                description_array = self.format_sequence(description.split(),
-                                                         generation=not in_callbacks,
-                                                         in_callbacks=in_callbacks)
+                description_array = self.format_sequence(description.split(), train=True)
                 arrays[0][i] = description_array
                 if self.use_image and self.use_source:
-                    if self.args.peeking_source:
-                        arrays[1][i, :] = \
-                                self.get_source_features(split,
-                                                         ident)
-                    else:
-                        arrays[1][i, 0] = \
-                                self.get_source_features(split,
-                                                         ident)
-                    if self.args.mrnn:
-                        arrays[2][i, :] = img_feats
-                    else:
-                        arrays[2][i, 0] = img_feats
+                    arrays[1][i] = self.get_source_features(split, ident)
+                    arrays[2][i] = img_feats
                 elif self.use_image:
-                    if self.args.mrnn:
-                        arrays[1][i, :] = img_feats
-                    else:
-                        arrays[1][i, 0] = img_feats
+                    arrays[1][i] = img_feats
                 elif self.use_source:
-                    if self.args.peeking_source:
-                        arrays[1][i, :] = \
-                                self.get_source_features(split,
-                                                         ident)
-                    else:
-                        arrays[1][i, 0] = \
-                                self.get_source_features(split,
-                                                         ident)
+                    arrays[1][i] = self.get_source_features(split, ident)
                 batch_indices.append([ident, desc_idx])
                 i += 1
             except AssertionError:
@@ -403,11 +340,9 @@ class VisualWordDataGenerator(object):
                                 len(self.word2index))))
         if self.use_source:  # hsn_array at arrays[1] (if used)
             arrays.append(np.zeros((batch_size,
-                                    t,
                                     self.hsn_size)))
         if self.use_image:  # at arrays[2] or arrays[1]
             arrays.append(np.zeros((batch_size,
-                                    t,
                                     IMG_FEATS)))
         return arrays
 
@@ -446,8 +381,17 @@ class VisualWordDataGenerator(object):
                     arrays[0].shape[0], new_size)
 
         for i, array in enumerate(arrays):
-            arrays[i] = np.resize(array, (new_size, array.shape[1],
-                                          array.shape[2]))
+            if array.ndim == 3:
+                # instances x timesteps x features
+                # typically the input tokens
+                arrays[i] = np.resize(array, (new_size,
+                                              array.shape[1],
+                                              array.shape[2]))
+            elif array.ndim == 2:
+                # instances x features
+                # typically the image or source features
+                arrays[i] = np.resize(array, (new_size, array.shape[1]))
+
         return arrays
 
     def format_sequence(self, sequence, generation=False, train=False,

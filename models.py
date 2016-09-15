@@ -1,53 +1,54 @@
 from keras.models import Model
-from keras.layers import Input, Activation, Dropout, Merge, TimeDistributed, Masking, Dense
+from keras.layers import Input, Activation, Dropout, Merge, TimeDistributed, Masking, Dense, Lambda
 from keras.layers.recurrent import LSTM, GRU
 from keras.layers.embeddings import Embedding
 from keras.regularizers import l2
 from keras.optimizers import Adam
 from keras import backend as K
-
+from InitialisableRNN import InitialisableLSTM, InitialisableGRU
 
 import h5py
 import shutil
 import logging
 import sys
+import numpy as np
 
 # Set up logger
 logging.basicConfig(level=logging.INFO, stream=sys.stdout)
 logger = logging.getLogger(__name__)
 
+
 class NIC:
 
-    def __init__(self, embed_size, hidden_size, vocab_size, dropin, optimiser,
-                 l2reg, hsn_size=512, weights=None, gru=False,
-                 clipnorm=-1, batch_size=None, t=None, lr=0.001):
-
-        self.max_t = t  # Expected timesteps. Needed to build the Theano graph
+    def __init__(self, options):
+        self.max_t = options.max_t  # Expected timesteps. Needed to build the Theano graph
 
         # Model hyperparameters
-        self.vocab_size = vocab_size  # size of word vocabulary
-        self.embed_size = embed_size  # number of units in a word embedding
-        self.hsn_size = hsn_size  # size of the source hidden vector
-        self.hidden_size = hidden_size  # number of units in first LSTM
-        self.gru = gru  # gru recurrent layer? (false = lstm)
-        self.dropin = dropin  # prob. of dropping input units
-        self.l2reg = l2reg  # weight regularisation penalty
+        self.vocab_size = options.vocab_size  # size of word vocabulary
+        self.embed_size = options.embed_size  # number of units in a word embedding
+        self.hsn_size = options.source_size  # size of the source hidden vector
+        self.hidden_size = options.hidden_size  # number of units in first LSTM
+        self.gru = options.gru  # gru recurrent layer? (false = lstm)
+        self.dropin = options.dropin  # prob. of dropping input units
+        self.l2reg = options.l2reg  # weight regularisation penalty
+        self.concat = options.concat # concat or sum merge the inputs?
 
         # Optimiser hyperparameters
-        self.optimiser = optimiser  # optimisation method
-        self.lr = lr
+        self.optimiser = options.optimiser  # optimisation method
+        self.lr = options.lr
         self.beta1 = 0.9
         self.beta2 = 0.999
         self.epsilon = 1e-8
-        self.clipnorm = clipnorm
+        self.clipnorm = options.clipnorm
 
-        self.weights = weights  # initialise with checkpointed weights?
+        self.weights = options.init_from_checkpoint  # initialise with checkpointed weights?
+        self.transfer_img_emb = options.transfer_img_emb
 
     def buildKerasModel(self, use_sourcelang=False, use_image=True):
         '''
         Define the exact structure of your model here. We create an image
         description generation model by merging the VGG image features with
-        a word embedding model, with an LSTM over the sequences.
+        a word embedding model, with an RNN over the sequences.
         '''
         logger.info('Building Keras model...')
 
@@ -68,60 +69,68 @@ class NIC:
                                       name='wemb_to_hidden')(drop_wemb)
 
         if use_image:
-            # Image 'embedding'
             logger.info('Using image features: %s', use_image)
-            img_input = Input(shape=(self.max_t, 4096), name='img')
-            img_emb = TimeDistributed(Dense(output_dim=self.hidden_size,
-                                            input_dim=4096,
-                                            W_regularizer=l2(self.l2reg)),
-                                            name='img_emb')(img_input)
-            img_drop = Dropout(self.dropin, name='img_embed_drop')(img_emb)
+            img_input = Input(shape=(4096,), name='img')
+            if not self.concat:
+                # Image 'embedding'
+                #l2_img_input = Lambda(lambda x: K.l2_normalize(x, axis=0))(img_input)
+                img_emb = Dense(output_dim=self.hidden_size,
+                                                input_dim=4096,
+                                                W_regularizer=l2(self.l2reg),
+                                                name='img_emb')(img_input)
+                img_drop = Dropout(self.dropin, name='img_embed_drop')(img_emb)
 
         if use_sourcelang:
             logger.info('Using source features: %s', use_sourcelang)
             logger.info('Size of source feature vectors: %d', self.hsn_size)
-            src_input = Input(shape=(self.max_t, self.hsn_size), name='src')
-            src_relu = Activation('relu', name='src_relu')(src_input)
-            src_embed = TimeDistributed(Dense(output_dim=self.hidden_size,
-                                              input_dim=self.hsn_size,
-                                              W_regularizer=l2(self.l2reg)),
-                                              name="src_embed")(src_relu)
-            src_drop = Dropout(self.dropin, name="src_drop")(src_embed)
+            src_input = Input(shape=(self.hsn_size,), name='src')
+            if not self.concat:
+                # Source 'embedding'
+                src_relu = Activation('relu', name='src_relu')(src_input)
+                src_embed = Dense(output_dim=self.hidden_size,
+                                                  input_dim=self.hsn_size,
+                                                  W_regularizer=l2(self.l2reg),
+                                                  name="src_embed")(src_relu)
+                src_drop = Dropout(self.dropin, name="src_drop")(src_embed)
 
         # Input nodes for the recurrent layer
-        rnn_input_dim = self.hidden_size
+        rnn_initialisation = None
         if use_image and use_sourcelang:
-            recurrent_inputs = [emb_to_hidden, img_drop, src_drop]
-            recurrent_inputs_names = ['emb_to_hidden', 'img_drop', 'src_drop']
-            inputs = [text_input, img_input, src_input]
+            # Concatenated embedding
+            merged_input = Merge(mode='concat')([img_input, src_input])
+            merge_embed = Dense(output_dim=self.hidden_size,
+                                           input_dim=4096+self.hsn_size,
+                                           W_regularizer=l2(self.l2reg),
+                                           name="merge_embed")(merged_input)
+            merge_drop = Dropout(self.dropin, name="merge_drop")(merge_embed)
+            rnn_initialisation = merge_drop
+            model_inputs = [text_input, img_input, src_input]
         elif use_image:
-            recurrent_inputs = [emb_to_hidden, img_drop]
-            recurrent_inputs_names = ['emb_to_hidden', 'img_drop']
-            inputs = [text_input, img_input]
+            rnn_initialisation = img_drop
+            model_inputs = [text_input, img_input]
         elif use_sourcelang:
-            recurrent_inputs = [emb_to_hidden, src_drop]
-            recurrent_inputs_names = ['emb_to_hidden', 'src_drop']
-            inputs = [text_input, src_input]
-        merged_input = Merge(mode='sum')(recurrent_inputs)
+            rnn_initialisation = src_drop
+            model_inputs = [text_input, src_input]
 
         # Recurrent layer
         if self.gru:
-            logger.info("Building a GRU with recurrent inputs %s", recurrent_inputs_names)
-            rnn = GRU(output_dim=self.hidden_size,
-                      input_dim=rnn_input_dim,
+            logger.info("Building a GRU")
+            rnn = InitialisableGRU(output_dim=self.hidden_size,
+                      input_dim=self.hidden_size,
                       return_sequences=True,
                       W_regularizer=l2(self.l2reg),
                       U_regularizer=l2(self.l2reg),
-                      name='rnn')(merged_input)
-
+                      name='rnn',
+                      initial_state=rnn_initialisation)(emb_to_hidden)
         else:
-            logger.info("Building an LSTM with recurrent inputs %s", recurrent_inputs_names)
-            rnn = LSTM(output_dim=self.hidden_size,
-                      input_dim=rnn_input_dim,
+            logger.info("Building an LSTM")
+            rnn = InitialisableLSTM(output_dim=self.hidden_size,
+                      input_dim=self.hidden_size,
                       return_sequences=True,
                       W_regularizer=l2(self.l2reg),
                       U_regularizer=l2(self.l2reg),
-                      name='rnn')(merged_input)
+                      name='rnn',
+                      initial_state=rnn_initialisation)(emb_to_hidden)
 
         output = TimeDistributed(Dense(output_dim=self.vocab_size,
                                        input_dim=self.hidden_size,
@@ -135,8 +144,10 @@ class NIC:
             optimiser = Adam(lr=self.lr, beta_1=self.beta1,
                              beta_2=self.beta2,  epsilon=self.epsilon,
                              clipnorm=self.clipnorm)
-            model = Model(input=inputs, output=output)
+            model = Model(input=model_inputs, output=output)
             model.compile(optimiser, {'output': 'categorical_crossentropy'})
+            if self.transfer_img_emb is not None:
+                self.load_specific_weight(model, self.transfer_img_emb, 'img_emb')
         else:
             model.compile(self.optimiser, {'output': 'categorical_crossentropy'})
 
@@ -153,9 +164,8 @@ class NIC:
 
     def buildHSNActivations(self, use_image=True):
         '''
-        Define the exact structure of your model here. We create an image
-        description generation model by merging the VGG image features with
-        a word embedding model, with an LSTM over the sequences.
+        We cut off the output layer of the model because we're only interested
+        in the activations in the hidden states.
         '''
 
         logger.info('Building Keras model...')
@@ -178,39 +188,36 @@ class NIC:
         if use_image:
             # Image 'embedding'
             logger.info('Using image features: %s', use_image)
-            img_input = Input(shape=(self.max_t, 4096), name='img')
-            img_emb = TimeDistributed(Dense(output_dim=self.hidden_size,
-                                            input_dim=4096,
-                                            W_regularizer=l2(self.l2reg)),
-                                            name='img_emb')(img_input)
+            img_input = Input(shape=(4096,), name='img')
+            img_emb = Dense(output_dim=self.hidden_size,
+                                       input_dim=4096,
+                                       W_regularizer=l2(self.l2reg),
+                                       name='img_emb')(img_input)
             img_drop = Dropout(self.dropin, name='img_embed_drop')(img_emb)
 
         # Input nodes for the recurrent layer
-        rnn_input_dim = self.hidden_size
-        if use_image:
-            recurrent_inputs = [emb_to_hidden, img_drop]
-            recurrent_inputs_names = ['emb_to_hidden', 'img_drop']
-            inputs = [text_input, img_input]
-        merged_input = Merge(mode='sum')(recurrent_inputs)
+        model_inputs = [text_input, img_input]
+        rnn_initialisation = img_drop
 
         # Recurrent layer
         if self.gru:
-            logger.info("Building a GRU with recurrent inputs %s", recurrent_inputs_names)
-            rnn = GRU(output_dim=self.hidden_size,
-                      input_dim=rnn_input_dim,
-                      return_sequences=True,
-                      W_regularizer=l2(self.l2reg),
-                      U_regularizer=l2(self.l2reg),
-                      name='rnn')(merged_input)
-
+            logger.info("Building a GRU")
+            rnn = InitialisableGRU(output_dim=self.hidden_size,
+                                   input_dim=self.hidden_size,
+                                   return_sequences=True,
+                                   W_regularizer=l2(self.l2reg),
+                                   U_regularizer=l2(self.l2reg),
+                                   name='rnn',
+                                   initial_state=rnn_initialisation)(emb_to_hidden)
         else:
-            logger.info("Building an LSTM with recurrent inputs %s", recurrent_inputs_names)
-            rnn = LSTM(output_dim=self.hidden_size,
-                      input_dim=rnn_input_dim,
-                      return_sequences=True,
-                      W_regularizer=l2(self.l2reg),
-                      U_regularizer=l2(self.l2reg),
-                      name='rnn')(merged_input)
+            logger.info("Building an LSTM")
+            rnn = InitialisableLSTM(output_dim=self.hidden_size,
+                                   input_dim=self.hidden_size,
+                                   return_sequences=True,
+                                   W_regularizer=l2(self.l2reg),
+                                   U_regularizer=l2(self.l2reg),
+                                   name='rnn',
+                                   initial_state=rnn_initialisation)(emb_to_hidden)
 
         if self.optimiser == 'adam':
             # allow user-defined hyper-parameters for ADAM because it is
@@ -218,8 +225,7 @@ class NIC:
             optimiser = Adam(lr=self.lr, beta_1=self.beta1,
                              beta_2=self.beta2, epsilon=self.epsilon,
                              clipnorm=self.clipnorm)
-            model = Model(input=[text_input, img_input], output=rnn)
-            print(model.get_config())
+            model = Model(input=model_inputs, output=rnn)
             model.compile(optimiser, {'rnn': 'categorical_crossentropy'})
         else:
             model.compile(self.optimiser, {'rnn': 'categorical_crossentropy'})
@@ -236,6 +242,44 @@ class NIC:
         #plot(model, to_file="model.png")
 
         return model
+
+    def load_specific_weight(self, model, pretrained, target_layer_name):
+        '''
+        Keras does not seem to support partially loading weights from one
+        model into another model. This function achieves the same purpose so
+        we can serialise the final RNN hidden state to disk.
+
+        TODO: find / engineer a more elegant and general approach
+        '''
+
+        w_file = h5py.File("%s/weights.hdf5" % pretrained)
+        print("Trying to load %s from %s" % (target_layer_name, pretrained))
+        # new file format
+
+        flattened_layers = model.layers
+        target_layer = None
+        for layer in model.layers:
+            weights = layer.weights
+            if layer.name == target_layer_name:
+                target_layer = layer
+                break
+
+        # Get a list of all the weights in the pre-trained weights file
+        pretrained_layer_names = [n.decode('utf8') for n in w_file.attrs['layer_names']]
+        filtered_layer_names = []
+        for name in pretrained_layer_names:
+            g = w_file[name]
+            weight_names = [n.decode('utf8') for n in g.attrs['weight_names']]
+            if len(weight_names):
+                filtered_layer_names.append(name)
+        layer_names = filtered_layer_names
+
+        for k, name in enumerate(layer_names):
+            if name == target_layer_name:
+                g = w_file[name]
+                weight_names = [n.decode('utf8') for n in g.attrs['weight_names']]
+                weight_values = [g[weight_name] for weight_name in weight_names]
+                target_layer.set_weights(weight_values)
 
     def partial_load_weights(self, model, f):
         '''
@@ -293,144 +337,4 @@ class NIC:
             weight_value_tuples += zip(symbolic_weights, weight_values)
         K.batch_set_value(weight_value_tuples)
 
-class MRNN:
-    '''
-    TODO: port this model architecture to Keras 1.0.7
-    '''
-
-    def __init__(self, embed_size, hidden_size, vocab_size, dropin, optimiser,
-                 l2reg, hsn_size=512, weights=None, gru=False,
-                 clipnorm=-1, batch_size=None, t=None, lr=0.001):
-
-        self.max_t = t  # Expected timesteps. Needed to build the Theano graph
-
-        # Model hyperparameters
-        self.vocab_size = vocab_size  # size of word vocabulary
-        self.embed_size = embed_size  # number of units in a word embedding
-        self.hsn_size = hsn_size  # size of the source hidden vector
-        self.hidden_size = hidden_size  # number of units in first LSTM
-        self.gru = gru  # gru recurrent layer? (false = lstm)
-        self.dropin = dropin  # prob. of dropping input units
-        self.l2reg = l2reg  # weight regularisation penalty
-
-        # Optimiser hyperparameters
-        self.optimiser = optimiser  # optimisation method
-        self.lr = lr
-        self.beta1 = 0.9
-        self.beta2 = 0.999
-        self.epsilon = 1e-8
-        self.clipnorm = clipnorm
-
-        self.weights = weights  # initialise with checkpointed weights?
-
-    def buildKerasModel(self, use_sourcelang=False, use_image=True):
-        '''
-        Define the exact structure of your model here. We create an image
-        description generation model by merging the VGG image features with
-        a word embedding model, with an LSTM over the sequences.
-
-        The order in which these appear below (text, image) is _IMMUTABLE_.
-        (Needs to match up with input to model.fit.)
-        '''
-        logger.info('Building Keras model...')
-        logger.info('Using image features: %s', use_image)
-        logger.info('Using source language features: %s', use_sourcelang)
-
-        model = Graph()
-        model.add_input('text', input_shape=(self.max_t, self.vocab_size))
-        model.add_node(Masking(mask_value=0.), input='text', name='text_mask')
-
-        # Word embeddings
-        model.add_node(TimeDistributedDense(output_dim=self.embed_size,
-                                            input_dim=self.vocab_size,
-                                            W_regularizer=l2(self.l2reg)),
-                                            name="w_embed", input='text_mask')
-        model.add_node(Dropout(self.dropin),
-                       name="w_embed_drop",
-                       input="w_embed")
-
-        # Embed -> Hidden
-        model.add_node(TimeDistributedDense(output_dim=self.hidden_size,
-                                      input_dim=self.embed_size,
-                                      W_regularizer=l2(self.l2reg)),
-                                      name='embed_to_hidden', input='w_embed_drop')
-        recurrent_inputs = 'embed_to_hidden'
-
-        # Source language input
-        if use_sourcelang:
-            model.add_input('source', input_shape=(self.max_t, self.hsn_size))
-            model.add_node(Masking(mask_value=0.),
-                           input='source',
-                           name='source_mask')
-
-            model.add_node(TimeDistributedDense(output_dim=self.hidden_size,
-                                                input_dim=self.hsn_size,
-                                                W_regularizer=l2(self.l2reg)),
-                                                name="s_embed",
-                                                input="source_mask")
-            model.add_node(Dropout(self.dropin),
-                           name="s_embed_drop",
-                           input="s_embed")
-            recurrent_inputs = ['embed_to_hidden', 's_embed_drop']
-
-        # Recurrent layer
-        if self.gru:
-            model.add_node(GRU(output_dim=self.hidden_size,
-                           input_dim=self.hidden_size,
-                           return_sequences=True), name='rnn',
-                           input=recurrent_inputs)
-
-        else:
-            model.add_node(LSTM(output_dim=self.hidden_size,
-                           input_dim=self.hidden_size,
-                           return_sequences=True), name='rnn',
-                           input=recurrent_inputs)
-
-        # Image 'embedding'
-        model.add_input('img', input_shape=(self.max_t, 4096))
-        model.add_node(Masking(mask_value=0.),
-                       input='img', name='img_mask')
-
-        model.add_node(TimeDistributedDense(output_dim=self.hidden_size,
-                                            input_dim=4096,
-                                            W_regularizer=l2(self.l2reg)),
-                                            name='i_embed', input='img_mask')
-        model.add_node(Dropout(self.dropin), name='i_embed_drop', input='i_embed')
-
-        # Multimodal layer outside the recurrent layer
-        model.add_node(TimeDistributedDense(output_dim=self.hidden_size,
-                                       input_dim=self.hidden_size,
-                                       W_regularizer=l2(self.l2reg)),
-                                       name='m_layer',
-                                       inputs=['rnn','i_embed_drop', 'embed_to_hidden'],
-                                       merge_mode='sum')
-
-        model.add_node(TimeDistributedDense(output_dim=self.vocab_size,
-                                            input_dim=self.hidden_size,
-                                            W_regularizer=l2(self.l2reg),
-                                            activation='softmax'),
-                                            name='output',
-                                            input='m_layer',
-                                            create_output=True)
-
-        if self.optimiser == 'adam':
-            # allow user-defined hyper-parameters for ADAM because it is
-            # our preferred optimiser
-            optimiser = Adam(lr=self.lr, beta_1=self.beta1,
-                             beta_2=self.beta2, epsilon=self.epsilon,
-                             clipnorm=self.clipnorm)
-            model.compile(optimiser, {'output': 'categorical_crossentropy'})
-        else:
-            model.compile(self.optimiser, {'output': 'categorical_crossentropy'})
-
-        if self.weights is not None:
-            logger.info("... with weights defined in %s", self.weights)
-            # Initialise the weights of the model
-            shutil.copyfile("%s/weights.hdf5" % self.weights,
-                            "%s/weights.hdf5.bak" % self.weights)
-            model.load_weights("%s/weights.hdf5" % self.weights)
-
-        #plot(model, to_file="model.png")
-
-        return model
  

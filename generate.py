@@ -366,7 +366,6 @@ class GroundedTranslationGenerator:
         handle.close()
         return pplx
 
-
     def reset_text_arrays(self, text_arrays, fixed_words=1):
         """ Reset the values in the text data structure to zero so we cannot
         accidentally pass them into the model.
@@ -396,8 +395,8 @@ class GroundedTranslationGenerator:
                 # Make a deep copy of the word_feats structures 
                 # so the arrays will never be shared
                 dupes[0].append(deepcopy(words[0,:,:]))
-                dupes[1].append(source[0,:,:])
-                dupes[2].append(img[0,:,:])
+                dupes[1].append(source[0,:])
+                dupes[2].append(img[0,:])
 
             # Turn the list of arrays into a numpy array
             dupes[0] = np.array(dupes[0])
@@ -416,7 +415,7 @@ class GroundedTranslationGenerator:
                 # Make a deep copy of the word_feats structures 
                 # so the arrays will never be shared
                 dupes[0].append(deepcopy(words[0,:,:]))
-                dupes[1].append(img[0,:,:])
+                dupes[1].append(img[0,:])
 
             # Turn the list of arrays into a numpy array
             dupes[0] = np.array(dupes[0])
@@ -434,7 +433,7 @@ class GroundedTranslationGenerator:
                 # Make a deep copy of the word_feats structures 
                 # so the arrays will never be shared
                 dupes[0].append(deepcopy(words[0,:,:]))
-                dupes[1].append(source[0,:,:])
+                dupes[1].append(source[0,:])
 
             # Turn the list of arrays into a numpy array
             dupes[0] = np.array(dupes[0])
@@ -556,27 +555,10 @@ class GroundedTranslationGenerator:
             t = self.args.generation_timesteps
         else:
             t = self.data_gen.max_seq_len
-        if self.args.mrnn:
-            m = models.MRNN(self.args.embed_size, self.args.hidden_size,
-                            self.vocab_len,
-                            self.args.dropin,
-                            self.args.optimiser, self.args.l2reg,
-                            hsn_size=self.hsn_size,
-                            weights=self.args.checkpoint,
-                            gru=self.args.gru,
-                            clipnorm=self.args.clipnorm,
-                            t=t)
-        else:
-            m = models.NIC(self.args.embed_size, self.args.hidden_size,
-                           self.vocab_len,
-                           self.args.dropin,
-                           self.args.optimiser, self.args.l2reg,
-                           hsn_size=self.hsn_size,
-                           weights=self.args.checkpoint,
-                           gru=self.args.gru,
-                           clipnorm=self.args.clipnorm,
-                           t=t)
-
+        args.vocab = self.vocab_len
+        args.hsn_size = self.hsn_size
+        args.max_t = t
+        m = models.NIC(self.args)
         self.model = m.buildKerasModel(use_sourcelang=self.use_sourcelang,
                                        use_image=self.use_image)
 
@@ -646,12 +628,6 @@ if __name__ == "__main__":
     parser.add_argument("--big_batch_size", default=10000, type=int,
                         help="Number of examples to load from disk at a time;\
                         0 loads entire dataset. Default is 10000")
-    parser.add_argument("--mrnn", action="store_true", 
-                        help="Use a Mao-style multimodal recurrent neural\
-                        network?")
-    parser.add_argument("--peeking_source", action="store_true",
-                        help="Input the source features at every timestep?\
-                        Default=False.")
 
     # Optimisation details
     parser.add_argument("--optimiser", default="adam", type=str,
