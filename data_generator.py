@@ -555,6 +555,7 @@ class VisualWordDataGenerator(object):
             # forcefully quit when trying to write to a read-only file
             raise RuntimeError("Dataset is read-only, try again with --h5_writable")
 
+        #print("%s %s %s" % (split, data_key, dataset_key))
         try:
             source_data = self.dataset[split][data_key].create_dataset(
                                   dataset_key, ((self.args.num_sents, dims)),

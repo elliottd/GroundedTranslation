@@ -31,7 +31,6 @@ class NIC:
         self.gru = options.gru  # gru recurrent layer? (false = lstm)
         self.dropin = options.dropin  # prob. of dropping input units
         self.l2reg = options.l2reg  # weight regularisation penalty
-        self.concat = options.concat # concat or sum merge the inputs?
 
         # Optimiser hyperparameters
         self.optimiser = options.optimiser  # optimisation method
@@ -68,36 +67,15 @@ class NIC:
                                       W_regularizer=l2(self.l2reg)),
                                       name='wemb_to_hidden')(drop_wemb)
 
-        if use_image:
-            logger.info('Using image features: %s', use_image)
-            img_input = Input(shape=(4096,), name='img')
-            if not self.concat:
-                # Image 'embedding'
-                #l2_img_input = Lambda(lambda x: K.l2_normalize(x, axis=0))(img_input)
-                img_emb = Dense(output_dim=self.hidden_size,
-                                                input_dim=4096,
-                                                W_regularizer=l2(self.l2reg),
-                                                name='img_emb')(img_input)
-                img_drop = Dropout(self.dropin, name='img_embed_drop')(img_emb)
-
-        if use_sourcelang:
-            logger.info('Using source features: %s', use_sourcelang)
-            logger.info('Size of source feature vectors: %d', self.hsn_size)
-            src_input = Input(shape=(self.hsn_size,), name='src')
-            if not self.concat:
-                # Source 'embedding'
-                src_relu = Activation('relu', name='src_relu')(src_input)
-                src_embed = Dense(output_dim=self.hidden_size,
-                                                  input_dim=self.hsn_size,
-                                                  W_regularizer=l2(self.l2reg),
-                                                  name="src_embed")(src_relu)
-                src_drop = Dropout(self.dropin, name="src_drop")(src_embed)
-
-        # Input nodes for the recurrent layer
-        rnn_initialisation = None
         if use_image and use_sourcelang:
             # Concatenated embedding
-            merged_input = Merge(mode='concat')([img_input, src_input])
+            logger.info('Using %d dim image features', 4096)
+            img_input = Input(shape=(4096,), name='img')
+            logger.info('Using %d dim source features', self.hsn_size)
+            src_input = Input(shape=(self.hsn_size,), name='src')
+            src_relu = Activation('relu')(src_input)
+            logger.info("Creating a %d dim concatenated input", (4096+self.hsn_size))
+            merged_input = Merge(mode='concat')([img_input, src_relu])
             merge_embed = Dense(output_dim=self.hidden_size,
                                            input_dim=4096+self.hsn_size,
                                            W_regularizer=l2(self.l2reg),
@@ -106,9 +84,26 @@ class NIC:
             rnn_initialisation = merge_drop
             model_inputs = [text_input, img_input, src_input]
         elif use_image:
+            logger.info('Using %d dim image features', 4096)
+            img_input = Input(shape=(4096,), name='img')
+            # Image 'embedding'
+            img_emb = Dense(output_dim=self.hidden_size,
+                                       input_dim=4096,
+                                       W_regularizer=l2(self.l2reg),
+                                       name='img_emb')(img_input)
+            img_drop = Dropout(self.dropin, name='img_embed_drop')(img_emb)
             rnn_initialisation = img_drop
             model_inputs = [text_input, img_input]
         elif use_sourcelang:
+            logger.info('Using %d dim source features', self.hsn_size)
+            src_input = Input(shape=(self.hsn_size,), name='src')
+            src_relu = Activation('relu')(src_input)
+            # Source 'embedding'
+            src_embed = Dense(output_dim=self.hidden_size,
+                                         input_dim=self.hsn_size,
+                                         W_regularizer=l2(self.l2reg),
+                                         name="src_embed")(src_relu)
+            src_drop = Dropout(self.dropin, name="src_drop")(src_embed)
             rnn_initialisation = src_drop
             model_inputs = [text_input, src_input]
 
@@ -246,14 +241,14 @@ class NIC:
     def load_specific_weight(self, model, pretrained, target_layer_name):
         '''
         Keras does not seem to support partially loading weights from one
-        model into another model. This function achieves the same purpose so
-        we can serialise the final RNN hidden state to disk.
+        model into another model. This function makes it possible to load a
+        specific weight into the model using the target_layer_name variable.
 
         TODO: find / engineer a more elegant and general approach
         '''
 
         w_file = h5py.File("%s/weights.hdf5" % pretrained)
-        print("Trying to load %s from %s" % (target_layer_name, pretrained))
+        logger.info("Trying to load %s from %s", target_layer_name, pretrained)
         # new file format
 
         flattened_layers = model.layers

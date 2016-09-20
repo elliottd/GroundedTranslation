@@ -152,7 +152,7 @@ class CompilationOfCallbacks(Callback):
         handle = open("checkpoints/%s/summary" % self.args.run_string, "w")
 
         for epoch in range(len(self.val_loss)):
-            handle.write("Checkpoint %d | val loss: %.5f bleu %.2f\n"
+            handle.write("Checkpoint %d | val loss: %.5f score %.2f\n"
                          % (epoch+1, self.val_loss[epoch],
                             self.val_metric[epoch]))
 

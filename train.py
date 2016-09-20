@@ -56,19 +56,7 @@ class GroundedTranslation(object):
         losses.history.['val_loss']
         '''
 
-        if self.args.mrnn:
-            m = models.MRNN(self.args.embed_size, self.args.hidden_size,
-                            self.V, self.args.dropin,
-                            self.args.optimiser, self.args.l2reg,
-                            hsn_size=hsn_size,
-                            weights=self.args.init_from_checkpoint,
-                            gru=self.args.gru,
-                            clipnorm=self.args.clipnorm,
-                            t=self.data_generator.max_seq_len,
-                            lr=self.args.lr)
-        else:
-            m = models.NIC(self.args)
-
+        m = models.NIC(self.args)
         model = m.buildKerasModel(use_sourcelang=self.use_sourcelang,
                                   use_image=self.use_image)
 
@@ -164,7 +152,7 @@ if __name__ == "__main__":
                         to None)")
     parser.add_argument("--unk", type=int,
                         help="unknown character cut-off. Default=3", default=3)
-    parser.add_argument("--maximum_length", type=int, default=50,
+    parser.add_argument("--maximum_length", type=int, default=100,
                         help="Maximum length of sequences permissible\
 			in the training data (Default = 50)")
     parser.add_argument("--existing_vocab", type=str, default="",
@@ -198,8 +186,6 @@ if __name__ == "__main__":
                         help="Prob. of dropping embedding units. Default=0.5")
     parser.add_argument("--gru", action="store_true", help="Use GRU instead\
                         of LSTM recurrent state? (default = False)")
-    parser.add_argument("--concat", action="store_true",
-                        help="Concatenate the source and visual features?")
 
     # Optimisation details
     parser.add_argument("--optimiser", default="adam", type=str,

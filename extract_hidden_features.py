@@ -64,8 +64,9 @@ class ExtractFinalHiddenStateActivations:
         self.vocab_len = len(self.data_generator.index2word)
         t = self.args.generation_timesteps if self.args.use_predicted_tokens else self.data_generator.max_seq_len
 
-        args.max_t = t
-        args.vocab = self.vocab_len
+        self.args.max_t = t
+        self.args.vocab_size = self.vocab_len
+        self.args.source_size = 0
         m = models.NIC(self.args)
 
         self.fhs = m.buildHSNActivations(use_image=self.use_image)
@@ -75,7 +76,7 @@ class ExtractFinalHiddenStateActivations:
 
         self.new_generate_activations('train')
         self.new_generate_activations('val')
-        self.new_generate_activations('test')
+        #self.new_generate_activations('test')
 
     def new_generate_activations(self, split):
         '''
@@ -103,18 +104,19 @@ class ExtractFinalHiddenStateActivations:
                 data[0]['text'] = self.set_text_arrays(tokens, data[0]['text'])
 
             # We extract the FHS from either the oracle input tokens
-            hsn = self.fhs.predict({'text': data[0]['text'],
-                                    'img': data[0]['img']},
+            hsn = self.fhs.predict(data[0],
                                    batch_size=self.args.batch_size,
-                                    verbose=1)
+                                   verbose=1)
 
             for idx, h in enumerate(hsn):
                 # get final_hidden index on a sentence-by-sentence
                 # basis by searching for the first <E> in each trainY
                 eos = False
+                #print(data[0]['indices'][idx])
                 for widx, warr in enumerate(data[1]['output'][idx]):
                     w = np.argmax(warr)
                     if self.data_generator.index2word[w] == "<E>":
+                        #print(widx)
                         final_hidden = h[widx]
                         hidden_states.append(final_hidden)
                         eos = True
@@ -272,6 +274,9 @@ if __name__ == "__main__":
     parser.add_argument("--best_pplx", action="store_true",
                         help="Use the best PPLX checkpoint instead of the\
                         best BLEU checkpoint? Default = False.")
+    parser.add_argument("--transfer_img_emb", type=str, required=False,
+                        help="A pre-trained model from which to transfer the \
+                        weights for embedding the image in the RNN")
 
     # Define the types of input data the model will receive
     parser.add_argument("--dataset", default="", type=str, help="Path to the\
@@ -282,7 +287,7 @@ if __name__ == "__main__":
                         to None)")
     parser.add_argument("--unk", type=int,
                         help="unknown character cut-off. Default=3", default=3)
-    parser.add_argument("--maximum_length", type=int, default=50,
+    parser.add_argument("--maximum_length", type=int, default=100,
                         help="Maximum length of sequences permissible\
 			in the training data (Default = 50)")
     parser.add_argument("--existing_vocab", type=str, default="",
