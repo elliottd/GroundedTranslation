@@ -60,7 +60,7 @@ class ExtractFinalHiddenStateActivations:
         self.data_generator = VisualWordDataGenerator(self.args,
                                                       self.args.dataset)
         self.args.init_from_checkpoint = self.find_best_checkpoint()
-        self.data_generator.set_vocabulary(self.args.checkpoint)
+        self.data_generator.set_vocabulary(self.args.init_from_checkpoint)
         self.vocab_len = len(self.data_generator.index2word)
         t = self.args.generation_timesteps if self.args.use_predicted_tokens else self.data_generator.max_seq_len
 
