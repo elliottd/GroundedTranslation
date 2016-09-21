@@ -59,7 +59,7 @@ class ExtractFinalHiddenStateActivations:
 
         self.data_generator = VisualWordDataGenerator(self.args,
                                                       self.args.dataset)
-        self.args.checkpoint = self.find_best_checkpoint()
+        self.args.init_from_checkpoint = self.find_best_checkpoint()
         self.data_generator.set_vocabulary(self.args.checkpoint)
         self.vocab_len = len(self.data_generator.index2word)
         t = self.args.generation_timesteps if self.args.use_predicted_tokens else self.data_generator.max_seq_len
@@ -104,7 +104,8 @@ class ExtractFinalHiddenStateActivations:
                 data[0]['text'] = self.set_text_arrays(tokens, data[0]['text'])
 
             # We extract the FHS from either the oracle input tokens
-            hsn = self.fhs.predict(data[0],
+            hsn = self.fhs.predict({'text': data[0]['text'],
+                                    'img': data[0]['img']},
                                    batch_size=self.args.batch_size,
                                    verbose=1)
 

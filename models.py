@@ -104,7 +104,7 @@ class NIC:
                                          W_regularizer=l2(self.l2reg),
                                          name="src_embed")(src_relu)
             src_drop = Dropout(self.dropin, name="src_drop")(src_embed)
-            rnn_initialisation = src_drop
+            rnn_initialisation = src_embed
             model_inputs = [text_input, src_input]
 
         # Recurrent layer
@@ -139,12 +139,12 @@ class NIC:
             optimiser = Adam(lr=self.lr, beta_1=self.beta1,
                              beta_2=self.beta2,  epsilon=self.epsilon,
                              clipnorm=self.clipnorm)
-            model = Model(input=model_inputs, output=output)
-            model.compile(optimiser, {'output': 'categorical_crossentropy'})
-            if self.transfer_img_emb is not None:
-                self.load_specific_weight(model, self.transfer_img_emb, 'img_emb')
         else:
-            model.compile(self.optimiser, {'output': 'categorical_crossentropy'})
+            optimiser = self.optimiser
+        model = Model(input=model_inputs, output=output)
+        model.compile(optimiser, {'output': 'categorical_crossentropy'})
+        if self.transfer_img_emb is not None:
+            self.load_specific_weight(model, self.transfer_img_emb, 'img_emb')
 
         if self.weights is not None:
             logger.info("... with weights defined in %s", self.weights)
@@ -180,15 +180,14 @@ class NIC:
                                       W_regularizer=l2(self.l2reg)),
                                       name='wemb_to_hidden')(drop_wemb)
 
-        if use_image:
-            # Image 'embedding'
-            logger.info('Using image features: %s', use_image)
-            img_input = Input(shape=(4096,), name='img')
-            img_emb = Dense(output_dim=self.hidden_size,
-                                       input_dim=4096,
-                                       W_regularizer=l2(self.l2reg),
-                                       name='img_emb')(img_input)
-            img_drop = Dropout(self.dropin, name='img_embed_drop')(img_emb)
+        # Image 'embedding'
+        logger.info('Using image features: %s', use_image)
+        img_input = Input(shape=(4096,), name='img')
+        img_emb = Dense(output_dim=self.hidden_size,
+                                   input_dim=4096,
+                                   W_regularizer=l2(self.l2reg),
+                                   name='img_emb')(img_input)
+        img_drop = Dropout(self.dropin, name='img_embed_drop')(img_emb)
 
         # Input nodes for the recurrent layer
         model_inputs = [text_input, img_input]
@@ -220,10 +219,10 @@ class NIC:
             optimiser = Adam(lr=self.lr, beta_1=self.beta1,
                              beta_2=self.beta2, epsilon=self.epsilon,
                              clipnorm=self.clipnorm)
-            model = Model(input=model_inputs, output=rnn)
-            model.compile(optimiser, {'rnn': 'categorical_crossentropy'})
         else:
-            model.compile(self.optimiser, {'rnn': 'categorical_crossentropy'})
+            optimiser = self.optimiser
+        model = Model(input=model_inputs, output=rnn)
+        model.compile(optimiser, {'rnn': 'categorical_crossentropy'})
 
         if self.weights is not None:
             logger.info("... with weights defined in %s", self.weights)
