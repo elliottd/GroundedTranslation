@@ -297,7 +297,9 @@ class VisualWordDataGenerator(object):
             description = self.dataset[split][ident]['descriptions'][desc_idx]
             img_feats = self.get_image_features(self.dataset, split, ident)
             try:
-                description_array = self.format_sequence(description.split(), train=True)
+                description_array = self.format_sequence(description.split(),
+                                                         train=False,
+                                                         in_callbacks=in_callbacks)
                 arrays[0][i] = description_array
                 if self.use_image and self.use_source:
                     arrays[1][i] = self.get_source_features(split, ident)
@@ -310,6 +312,7 @@ class VisualWordDataGenerator(object):
                 i += 1
             except AssertionError:
                 # If the description doesn't share any words with the vocabulary.
+                logger.info('Could not encode %s', description)
                 pass
         if i != 0:
             logger.debug("Outside for loop")
@@ -394,8 +397,7 @@ class VisualWordDataGenerator(object):
 
         return arrays
 
-    def format_sequence(self, sequence, generation=False, train=False,
-            in_callbacks=False):
+    def format_sequence(self, sequence, train=True, in_callbacks=False):
         """
         Transforms a list of words (sequence) into input matrix
         seq_array of (timesteps, vocab-onehot)
@@ -407,7 +409,8 @@ class VisualWordDataGenerator(object):
         The zero default value is equal to padding.
         """
 
-        if generation:
+        if not train:
+            # We're doing generation from within Callbacks.py or generate.py
             timesteps = self.max_seq_len if in_callbacks else self.args.generation_timesteps
             seq_array = np.zeros((timesteps,
                                   len(self.word2index)))
@@ -418,10 +421,10 @@ class VisualWordDataGenerator(object):
         w_indices = [self.word2index[w] for w in sequence
                      if w in self.word2index]
 
-	if train and self.is_too_long(w_indices):
-		# We don't process training sequences that are too long
-                logger.debug("Skipping '%s' because it is too long" % ' '.join([x for x in sequence]))
-		raise AssertionError
+        if train and self.is_too_long(w_indices):
+            # We don't process training sequences that are too long
+            logger.debug("Skipping '%s' because it is too long" % ' '.join([x for x in sequence]))
+            raise AssertionError
 
         if len(w_indices) > self.actual_max_seq_len:
             self.actual_max_seq_len = len(w_indices)

@@ -27,7 +27,6 @@ logger = logging.getLogger(__name__)
 
 # Dimensionality of image feature vector
 IMG_FEATS = 4096
-HSN_SIZE = 409
 MULTEVAL_DIR = '../multeval-0.5.1' if "util" in os.getcwd() else "multeval-0.5.1"
 
 
@@ -88,6 +87,7 @@ class CompilationOfCallbacks(Callback):
             self.source_dataset = h5py.File("%s/dataset.h5" % self.args.source_vectors, "r")
 
     def on_epoch_end(self, epoch, logs={}):
+
         '''
         At the end of each epoch we
           1. create a directory to checkpoint data
@@ -120,30 +120,29 @@ class CompilationOfCallbacks(Callback):
 	TODO: this doesn't yet support early stopping based on TER
         '''
 
-	if val_loss < self.best_val_loss:
-	    self.wait = 0
+        if val_loss < self.best_val_loss:
+            self.wait = 0
         elif val_metric > self.best_val_metric or self.args.no_early_stopping:
             self.wait = 0
         else:
             self.wait += 1
             if self.wait >= self.patience:
                 # we have exceeded patience
-                if val_loss > self.best_val_loss:
-                    # and loss is no longer decreasing
-                    logger.info("Epoch %d: early stopping", epoch)
-                    handle = open("checkpoints/%s/summary"
-                                  % self.args.run_string, "a")
-                    handle.write("Early stopping because patience exceeded\n")
-                    best_bleu = np.nanargmax(self.val_metric)
-                    best_loss = np.nanargmin(self.val_loss)
-                    logger.info("Best Metric: %d | val loss %.5f score %.2f",
-                                best_bleu+1, self.val_loss[best_bleu],
-                                self.val_metric[best_bleu])
-                    logger.info("Best loss: %d | val loss %.5f score %.2f",
-                                best_loss+1, self.val_loss[best_loss],
-                                self.val_metric[best_loss])
-                    handle.close()
-                    sys.exit(0)
+                logger.info("Epoch %d: early stopping", epoch)
+                handle = open("checkpoints/%s/summary"
+                              % self.args.run_string, "a")
+                handle.write("Early stopping because patience exceeded\n")
+                best_bleu = np.nanargmax(self.val_metric)
+                best_loss = np.nanargmin(self.val_loss)
+                logger.info("Best Metric: %d | val loss %.5f score %.2f",
+                             best_bleu+1, self.val_loss[best_bleu],
+                             self.val_metric[best_bleu])
+                logger.info("Best loss: %d | val loss %.5f score %.2f",
+                             best_loss+1, self.val_loss[best_loss],
+                             self.val_metric[best_loss])
+                handle.close()
+                sys.exit(0)
+        print(self.wait)
 
     def log_performance(self):
         '''
