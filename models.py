@@ -1,11 +1,10 @@
 from keras.models import Model
 from keras.layers import Input, Activation, Dropout, Merge, TimeDistributed, Masking, Dense, Lambda
-from keras.layers.recurrent import LSTM, GRU
 from keras.layers.embeddings import Embedding
 from keras.regularizers import l2
 from keras.optimizers import Adam
 from keras import backend as K
-from InitialisableRNN import InitialisableLSTM, InitialisableGRU
+from InitialisableRNN import InitialisableGRU
 
 import h5py
 import shutil
@@ -115,17 +114,7 @@ class NIC:
                       return_sequences=True,
                       W_regularizer=l2(self.l2reg),
                       U_regularizer=l2(self.l2reg),
-                      name='rnn',
-                      initial_state=rnn_initialisation)(emb_to_hidden)
-        else:
-            logger.info("Building an LSTM")
-            rnn = InitialisableLSTM(output_dim=self.hidden_size,
-                      input_dim=self.hidden_size,
-                      return_sequences=True,
-                      W_regularizer=l2(self.l2reg),
-                      U_regularizer=l2(self.l2reg),
-                      name='rnn',
-                      initial_state=rnn_initialisation)(emb_to_hidden)
+                      name='rnn')([emb_to_hidden, rnn_initialisation])
 
         output = TimeDistributed(Dense(output_dim=self.vocab_size,
                                        input_dim=self.hidden_size,
@@ -142,16 +131,16 @@ class NIC:
         else:
             optimiser = self.optimiser
         model = Model(input=model_inputs, output=output)
-        model.compile(optimiser, {'output': 'categorical_crossentropy'})
-        if self.transfer_img_emb is not None:
-            self.load_specific_weight(model, self.transfer_img_emb, 'img_emb')
-
         if self.weights is not None:
             logger.info("... with weights defined in %s", self.weights)
             # Initialise the weights of the model
             shutil.copyfile("%s/weights.hdf5" % self.weights,
                             "%s/weights.hdf5.bak" % self.weights)
             model.load_weights("%s/weights.hdf5" % self.weights)
+        model.compile(optimiser, {'output': 'categorical_crossentropy'})
+
+        if self.transfer_img_emb is not None:
+            self.load_specific_weight(model, self.transfer_img_emb, 'img_emb')
 
         #plot(model, to_file="model.png")
 
@@ -201,17 +190,8 @@ class NIC:
                                    return_sequences=True,
                                    W_regularizer=l2(self.l2reg),
                                    U_regularizer=l2(self.l2reg),
-                                   name='rnn',
-                                   initial_state=rnn_initialisation)(emb_to_hidden)
-        else:
-            logger.info("Building an LSTM")
-            rnn = InitialisableLSTM(output_dim=self.hidden_size,
-                                   input_dim=self.hidden_size,
-                                   return_sequences=True,
-                                   W_regularizer=l2(self.l2reg),
-                                   U_regularizer=l2(self.l2reg),
-                                   name='rnn',
-                                   initial_state=rnn_initialisation)(emb_to_hidden)
+                                   name='rnn')([emb_to_hidden,
+                                       rnn_initialisation])
 
         if self.optimiser == 'adam':
             # allow user-defined hyper-parameters for ADAM because it is
@@ -275,6 +255,64 @@ class NIC:
                 weight_values = [g[weight_name] for weight_name in weight_names]
                 target_layer.set_weights(weight_values)
 
+    def full_load_weights(self, model, f):
+        '''
+        Keras does not seem to support partially loading weights from one
+        model into another model. This function achieves the same purpose so
+        we can serialise the final RNN hidden state to disk.
+
+        TODO: find / engineer a more elegant and general approach
+        '''
+
+        f = h5py.File("%s" % f)
+        flattened_layers = model.layers
+
+        # new file format
+        filtered_layers = []
+        for layer in flattened_layers:
+            weights = layer.weights
+            if weights:
+                filtered_layers.append(layer)
+        flattened_layers = filtered_layers
+
+        layer_names = [n.decode('utf8') for n in f.attrs['layer_names']]
+        filtered_layer_names = []
+        for name in layer_names: # -1 so we clip out the output layer
+            g = f[name]
+            weight_names = [n.decode('utf8') for n in g.attrs['weight_names']]
+            if len(weight_names):
+                filtered_layer_names.append(name)
+        layer_names = filtered_layer_names
+        if len(layer_names) != len(flattened_layers):
+            raise Exception('You are trying to load a weight file '
+                            'containing ' + str(len(layer_names)) +
+                            ' layers into a model with ' +
+                            str(len(flattened_layers)) + ' layers.')
+
+        # we batch weight value assignments in a single backend call
+        # which provides a speedup in TensorFlow.
+        weight_value_tuples = []
+        for k, name in enumerate(layer_names):
+            g = f[name]
+            weight_names = [n.decode('utf8') for n in g.attrs['weight_names']]
+            weight_values = [g[weight_name] for weight_name in weight_names]
+            layer = flattened_layers[k]
+            symbolic_weights = layer.weights
+            if len(weight_values) != len(symbolic_weights):
+                raise Exception('Layer #' + str(k) +
+                                ' (named "' + layer.name +
+                                '" in the current model) was found to '
+                                'correspond to layer ' + name +
+                                ' in the save file. '
+                                'However the new layer ' + layer.name +
+                                ' expects ' + str(len(symbolic_weights)) +
+                                ' weights, but the saved weights have ' +
+                                str(len(weight_values)) +
+                                ' elements.')
+            weight_value_tuples += zip(symbolic_weights, weight_values)
+        K.batch_set_value(weight_value_tuples)
+        f.close()
+
     def partial_load_weights(self, model, f):
         '''
         Keras does not seem to support partially loading weights from one
@@ -295,6 +333,7 @@ class NIC:
         flattened_layers = filtered_layers
 
         layer_names = [n.decode('utf8') for n in f.attrs['layer_names']]
+        print(layer_names)
         filtered_layer_names = []
         for name in layer_names[:-1]: # -1 so we clip out the output layer
             g = f[name]

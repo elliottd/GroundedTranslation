@@ -76,7 +76,7 @@ class ExtractFinalHiddenStateActivations:
 
         self.new_generate_activations('train')
         self.new_generate_activations('val')
-        #self.new_generate_activations('test')
+        self.new_generate_activations('test')
 
     def new_generate_activations(self, split):
         '''

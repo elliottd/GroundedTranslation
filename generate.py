@@ -2,8 +2,8 @@ from __future__ import print_function
 
 import numpy as np
 np.set_printoptions(threshold='nan')
-import h5py
 import theano
+import h5py
 
 import argparse
 import itertools
@@ -70,8 +70,8 @@ class GroundedTranslationGenerator:
     def prepare_datagenerator(self):
         self.data_gen = VisualWordDataGenerator(self.args,
                                                 self.args.dataset)
-        self.args.checkpoint = self.find_best_checkpoint()
-        self.data_gen.set_vocabulary(self.args.checkpoint)
+        self.args.init_from_checkpoint = self.find_best_checkpoint()
+        self.data_gen.set_vocabulary(self.args.init_from_checkpoint)
         self.vocab_len = len(self.data_gen.index2word)
         self.index2word = self.data_gen.index2word
         self.word2index = self.data_gen.word2index
@@ -94,15 +94,15 @@ class GroundedTranslationGenerator:
         if self.model == None:
             self.build_model(generate=True)
 
-        self.generate_sentences(self.args.checkpoint, val=not self.args.test)
+        self.generate_sentences(self.args.init_from_checkpoint, val=not self.args.test)
         if not self.args.without_scores:
-            score = self.bleu_score(self.args.checkpoint, val=not self.args.test)
+            score = self.bleu_score(self.args.init_from_checkpoint, val=not self.args.test)
             if self.args.multeval:
-                score, _, _ = self.multeval_scores(self.args.checkpoint,
+                score, _, _ = self.multeval_scores(self.args.init_from_checkpoint,
                                                     val=not self.args.test)
             if not self.args.no_pplx:
                 self.build_model(generate=False)
-                self.calculate_pplx(self.args.checkpoint, val=not self.args.test)
+                self.calculate_pplx(self.args.init_from_checkpoint, val=not self.args.test)
             return score
 
     def generate_sentences(self, filepath, val=True):
@@ -277,19 +277,20 @@ class GroundedTranslationGenerator:
 
             generator = self.data_gen.generation_generator(prefix)
             seen = 0
+
             for data in generator:
                 text = deepcopy(data[0]['text'])
                 # Append the first start_gen words to the complete_sentences list
                 # for each instance in the batch.
                 complete_sentences = [[] for _ in range(text.shape[0])]
                 for t in range(start_gen):  # minimum 1
-                    for i in range(text .shape[0]):
+                    for i in range(text.shape[0]):
                         w = np.argmax(text[i, t])
                         complete_sentences[i].append(self.index2word[w])
-                del data[0]['text']
-                text = self.reset_text_arrays(text, start_gen)
+                #del data[0]['text']
+                #text = self.reset_text_arrays(text, start_gen)
                 Y_target = data[1]['output']
-                data[0]['text'] = text
+                #data[0]['text'] = text
 
                 for t in range(start_gen, self.args.generation_timesteps):
                     logger.debug("Input token: %s" % self.index2word[np.argmax(text[0,t-1])])
@@ -373,7 +374,7 @@ class GroundedTranslationGenerator:
         Helper function for generate_sentences().
          """
         reset_arrays = deepcopy(text_arrays)
-        reset_arrays[:,fixed_words:, :] = 0
+        reset_arrays[:,fixed_words:, :] = 1 #
         return reset_arrays
 
     def make_duplicate_matrices(self, generator_data, k):
@@ -555,12 +556,12 @@ class GroundedTranslationGenerator:
             t = self.args.generation_timesteps
         else:
             t = self.data_gen.max_seq_len
-        args.vocab = self.vocab_len
-        args.hsn_size = self.hsn_size
-        args.max_t = t
+        self.args.vocab_size = self.vocab_len
+        self.args.source_size = self.hsn_size
+        self.args.max_t = t
         m = models.NIC(self.args)
         self.model = m.buildKerasModel(use_sourcelang=self.use_sourcelang,
-                                       use_image=self.use_image)
+                                       use_image=True)
 
 
 if __name__ == "__main__":
@@ -678,6 +679,9 @@ if __name__ == "__main__":
                         for options.")
     parser.add_argument("--no_pplx", action="store_true",
 			help="Skip perplexity calculation?")
+    parser.add_argument("--transfer_img_emb", type=str, required=False,
+                        help="A pre-trained model from which to transfer the \
+                        weights for embedding the image in the RNN")
 
     # Legacy options
     parser.add_argument("--generate_from_N_words", type=int, default=0,
