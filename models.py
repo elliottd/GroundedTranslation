@@ -4,7 +4,7 @@ from keras.layers.embeddings import Embedding
 from keras.regularizers import l2
 from keras.optimizers import Adam
 from keras import backend as K
-from InitialisableRNN import InitialisableGRU
+from InitialisableRNN import InitialisableGRU, InitialisableLSTM
 
 import h5py
 import shutil
@@ -110,6 +110,14 @@ class NIC:
         if self.gru:
             logger.info("Building a GRU")
             rnn = InitialisableGRU(output_dim=self.hidden_size,
+                      input_dim=self.hidden_size,
+                      return_sequences=True,
+                      W_regularizer=l2(self.l2reg),
+                      U_regularizer=l2(self.l2reg),
+                      name='rnn')([emb_to_hidden, rnn_initialisation])
+        else:
+            logger.info("Building an LSTM")
+            rnn = InitialisableLSTM(output_dim=self.hidden_size,
                       input_dim=self.hidden_size,
                       return_sequences=True,
                       W_regularizer=l2(self.l2reg),

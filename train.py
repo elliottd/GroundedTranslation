@@ -210,7 +210,7 @@ if __name__ == "__main__":
     parser.add_argument("--no_early_stopping", action="store_true")
 
     # Language generation details
-    parser.add_argument("--generation_timesteps", default=30, type=int,
+    parser.add_argument("--generation_timesteps", default=10, type=int,
                         help="Maximum number of words to generate for unseen\
                         data (default=10).")
 
