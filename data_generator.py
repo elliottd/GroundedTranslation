@@ -361,17 +361,17 @@ class VisualWordDataGenerator(object):
             return [{'text': array[0],
                     'src': array[1],
                     'img': array[2],
-                    'indices': indices},
+                    'indices': np.array(indices)},
                     {'output': targets}]
         elif self.use_image:
             return [{'text': array[0],
                     'img': array[1],
-                    'indices': indices},
+                    'indices': np.array(indices)},
                     {'output': targets}]
         elif self.use_source:
             return [{'text': array[0],
                     'src': array[1],
-                    'indices': indices},
+                    'indices': np.array(indices)},
                     {'output': targets}]
 
     def resize_arrays(self, new_size, arrays):
