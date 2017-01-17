@@ -6,7 +6,7 @@ class InitialisableGRU(GRU):
        connected to different layer in the model.
 
     Inspired by:
-        https://gist.github.com/mbol#lmann/29fd21931820c64095617125824ea246
+        https://gist.github.com/mbollmann/29fd21931820c64095617125824ea246
 
     See Also:
         https://github.com/fchollet/#keras/issues/2995
