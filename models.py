@@ -200,6 +200,14 @@ class NIC:
                                    U_regularizer=l2(self.l2reg),
                                    name='rnn')([emb_to_hidden,
                                        rnn_initialisation])
+        else:
+            logger.info("Building an LSTM")
+            rnn = InitialisableLSTM(output_dim=self.hidden_size,
+                                    input_dim=self.hidden_size,
+                                    return_sequences=True,
+                                    W_regularizer=l2(self.l2reg),
+                                    U_regularizer=l2(self.l2reg),
+                                    name='rnn')([emb_to_hidden, rnn_initialisation])
 
         if self.optimiser == 'adam':
             # allow user-defined hyper-parameters for ADAM because it is
