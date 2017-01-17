@@ -275,7 +275,7 @@ class GroundedTranslationGenerator:
             handle = codecs.open("%s/%sGenerated" % (filepath, prefix), 
                                  "w", 'utf-8')
 
-            generator = self.data_gen.generation_generator(prefix)
+            generator = self.data_gen.fixed_generator(prefix)
             seen = 0
 
             for data in generator:
