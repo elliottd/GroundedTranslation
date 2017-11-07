@@ -333,7 +333,8 @@ class CompilationOfCallbacks(Callback):
         """ Reset the values in the text data structure to zero so we cannot
         accidentally pass them into the model """
         reset_arrays = deepcopy(text_arrays)
-        reset_arrays[:,fixed_words:, :] = 0
+        # Modified to suit 2D inputs rather than 3D
+        reset_arrays[:,fixed_words:] = 0
         return reset_arrays
 
     def generate_sentences(self, filepath, val=True):
@@ -383,7 +384,7 @@ class CompilationOfCallbacks(Callback):
                 logger.debug("Predicted token: %s" % self.index2word[next_word_indices[0]])
                 # update array[0]/sentence-so-far with generated words.
                 for i in range(len(next_word_indices)):
-                    inputs['text'][i, t, next_word_indices[i]] = 1.
+                    inputs['text'][i, t] = next_word_indices[i]
                 next_words = [self.index2word[x] for x in next_word_indices]
                 for i in range(len(next_words)):
                     complete_sentences[i].append(next_words[i])

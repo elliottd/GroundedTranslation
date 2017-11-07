@@ -249,8 +249,10 @@ class VisualWordDataGenerator(object):
                 logger.debug("Outside for loop")
                 self.resize_arrays(i, arrays)
                 targets = self.get_target_descriptions(arrays[0])
-                logger.debug(' '.join([self.index2word[np.argmax(x)] for x in
-                    arrays[0][0,:,:] if self.index2word[np.argmax(x)] != "<P>"]))
+                # Comment out because the descriptions went from 2D to 3D.
+                # TODO: make compatible with 2D input.
+                #logger.debug(' '.join([self.index2word[np.argmax(x)] for x in
+                #    arrays[0][0,:,:] if self.index2word[np.argmax(x)] != "<P>"]))
                 yield_data = self.create_yield_dict(arrays, targets,
                                                     batch_indices)
                 yield yield_data
@@ -282,9 +284,11 @@ class VisualWordDataGenerator(object):
             if i == batch_size:
                 targets = self.get_target_descriptions(arrays[0])
                 logger.debug(arrays[0].shape)
-                logger.debug(' '.join([self.index2word[np.argmax(x)] for x
-                    in arrays[0][0,:,:] if self.index2word[np.argmax(x)]
-                    != "<P>"]))
+                # Comment out after 3D -> 2D arrays. 
+                # TODO: make this work for 2D arrays.
+                #logger.debug(' '.join([self.index2word[np.argmax(x)] for x
+                #    in arrays[0][0,:,:] if self.index2word[np.argmax(x)]
+                #    != "<P>"]))
                 yield_data = self.create_yield_dict(arrays,
                                                     targets,
                                                     batch_indices)
@@ -318,8 +322,10 @@ class VisualWordDataGenerator(object):
             logger.debug("Outside for loop")
             self.resize_arrays(i, arrays)
             targets = self.get_target_descriptions(arrays[0])
-            logger.debug(' '.join([self.index2word[np.argmax(x)] for x in
-                arrays[0][0,:,:] if self.index2word[np.argmax(x)] != "<P>"]))
+            # Comment out to see if 2D works. 
+            # TODO: fix to make this work for 2D
+            # logger.debug(' '.join([self.index2word[np.argmax(x)] for x in
+            #    arrays[0][0,:,:] if self.index2word[np.argmax(x)] != "<P>"]))
             yield_data = self.create_yield_dict(arrays,
                                                 targets,
                                                 batch_indices)
