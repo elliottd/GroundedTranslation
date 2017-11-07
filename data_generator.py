@@ -338,9 +338,9 @@ class VisualWordDataGenerator(object):
         t = self.args.generation_timesteps if generation else self.max_seq_len
         arrays = []
         # dscrp_array at arrays[0]
-        arrays.append(np.zeros((batch_size,
-                                t,
-                                len(self.word2index))))
+        arrays.append(np.zeros((batch_size, t), dtype=np.int))
+                                # Make two-dimensional, because we go from one-hot to integers.
+                                # len(self.word2index))))
         if self.use_source:  # hsn_array at arrays[1] (if used)
             arrays.append(np.zeros((batch_size,
                                     self.hsn_size)))
@@ -397,6 +397,63 @@ class VisualWordDataGenerator(object):
 
         return arrays
 
+#    def format_sequence(self, sequence, train=True, in_callbacks=False):
+#        """
+#        Transforms a list of words (sequence) into input matrix
+#        seq_array of (timesteps, vocab-onehot)
+#
+#        generation == True will return an input matrix of length
+#        self.args.generation_timesteps. The first timestep will
+#        be set to <B>, everything else will be <P>.
+#
+#        The zero default value is equal to padding.
+#        """
+#
+#        if not train:
+#            # We're doing generation from within Callbacks.py or generate.py
+#            timesteps = self.max_seq_len if in_callbacks else self.args.generation_timesteps
+#            seq_array = np.zeros((timesteps,
+#                                  len(self.word2index)))
+#            seq_array[0, self.word2index[BOS]] = 1 # BOS token at t=0
+#            return seq_array
+#
+#        seq_array = np.zeros((self.max_seq_len, len(self.word2index)))
+#        w_indices = [self.word2index[w] for w in sequence
+#                     if w in self.word2index]
+#
+#        if train and self.is_too_long(w_indices):
+#            # We don't process training sequences that are too long
+#            logger.debug("Skipping '%s' because it is too long" % ' '.join([x for x in sequence]))
+#            raise AssertionError
+#
+#        if len(w_indices) > self.actual_max_seq_len:
+#            self.actual_max_seq_len = len(w_indices)
+#
+#        seq_array[0, self.word2index[BOS]] = 1  # BOS token at zero timestep
+#        time = 0
+#        for time, vocab in enumerate(w_indices):
+#            seq_array[time + 1, vocab] += 1
+#        # add EOS token at end of sentence
+#        try:
+#            assert time + 1 == len(w_indices),\
+#                "time %d sequence %s len w_indices %d seq_array %s" % (
+#                    time, " ".join([x for x in sequence]), len(w_indices),
+#                    seq_array)
+#        except AssertionError:
+#            if len(w_indices) == 0 and time == 0:
+#                # none of the words in this description appeared in the
+#                # vocabulary. this is most likely caused by the --unk
+#                # threshold.
+#                #
+#                # we don't encode this sentence because [BOS, EOS] doesn't
+#                # make sense
+#                logger.debug("Skipping '%s' because none of its words appear in the vocabulary" % ' '.join([x for x in sequence]))
+#                raise AssertionError
+#        seq_array[len(w_indices) + 1, self.word2index[EOS]] += 1
+#        return seq_array
+
+
+
     def format_sequence(self, sequence, train=True, in_callbacks=False):
         """
         Transforms a list of words (sequence) into input matrix
@@ -412,12 +469,14 @@ class VisualWordDataGenerator(object):
         if not train:
             # We're doing generation from within Callbacks.py or generate.py
             timesteps = self.max_seq_len if in_callbacks else self.args.generation_timesteps
-            seq_array = np.zeros((timesteps,
-                                  len(self.word2index)))
-            seq_array[0, self.word2index[BOS]] = 1 # BOS token at t=0
+            seq_array = np.zeros(timesteps, dtype=np.int)
+                                  # Make this 1D
+                                  #(timesteps,
+                                  #len(self.word2index)))
+            seq_array[0] = self.word2index[BOS]
             return seq_array
 
-        seq_array = np.zeros((self.max_seq_len, len(self.word2index)))
+        seq_array = np.zeros(self.max_seq_len, dtype=np.int)
         w_indices = [self.word2index[w] for w in sequence
                      if w in self.word2index]
 
@@ -429,28 +488,41 @@ class VisualWordDataGenerator(object):
         if len(w_indices) > self.actual_max_seq_len:
             self.actual_max_seq_len = len(w_indices)
 
-        seq_array[0, self.word2index[BOS]] = 1  # BOS token at zero timestep
-        time = 0
-        for time, vocab in enumerate(w_indices):
-            seq_array[time + 1, vocab] += 1
+        seq_array[0] = self.word2index[BOS]  # BOS token at zero timestep
+        for time, vocab in enumerate(w_indices, start=1):
+            seq_array[time] = vocab
+        
         # add EOS token at end of sentence
-        try:
-            assert time + 1 == len(w_indices),\
-                "time %d sequence %s len w_indices %d seq_array %s" % (
-                    time, " ".join([x for x in sequence]), len(w_indices),
-                    seq_array)
+        try: 
+            assert len(w_indices) != 0
         except AssertionError:
-            if len(w_indices) == 0 and time == 0:
-                # none of the words in this description appeared in the
-                # vocabulary. this is most likely caused by the --unk
-                # threshold.
-                #
-                # we don't encode this sentence because [BOS, EOS] doesn't
-                # make sense
-                logger.debug("Skipping '%s' because none of its words appear in the vocabulary" % ' '.join([x for x in sequence]))
-                raise AssertionError
-        seq_array[len(w_indices) + 1, self.word2index[EOS]] += 1
+            # none of the words in this description appeared in the
+            # vocabulary. this is most likely caused by the --unk
+            # threshold.
+            #
+            # we don't encode this sentence because [BOS, EOS] doesn't
+            # make sense
+            logger.debug("Skipping '%s' because none of its words appear in the vocabulary" % ' '.join([x for x in sequence]))
+            raise AssertionError
+        seq_array[len(w_indices) + 1] = self.word2index[EOS]
+        # print(seq_array)
         return seq_array
+
+    def ints_to_onehot(self, sequence):
+        """
+        Convert an integer sequence into a one-hot sequence.
+	"""
+        seq_array = np.zeros((self.max_seq_len, len(self.word2index)))
+        for i, index in enumerate(sequence):
+            # print(index, type(index))
+            seq_array[i][index] = 1
+        return seq_array
+
+    def batch_ints_to_onehot(self, batch):
+        """
+        Convert a batch of int sequences to a batch of sequences of one-hot vectors.
+        """
+        return np.array([self.ints_to_onehot(sequence) for sequence in batch])
 
     def get_target_descriptions(self, input_array):
         """
@@ -459,8 +531,12 @@ class VisualWordDataGenerator(object):
 
         Helper function used by {random,fixed,generation}_generator()
         """
-        target_array = np.zeros(input_array.shape)
-        target_array[:, :-1, :] = input_array[:, 1:, :]
+        # print(input_array)
+        target_array = np.zeros(input_array.shape, dtype=np.int)
+        #target_array[:, :-1, :] = input_array[:, 1:, :]
+        # Move by -1
+        target_array[:, :-1] = input_array[:, 1:]
+        target_array = self.batch_ints_to_onehot(target_array)
         return target_array
 
     def get_refs_by_split_as_list(self, split):
