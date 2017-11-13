@@ -374,7 +374,8 @@ class GroundedTranslationGenerator:
         Helper function for generate_sentences().
          """
         reset_arrays = deepcopy(text_arrays)
-        reset_arrays[:,fixed_words:, :] = 1 #
+	# Modified to suit 2D inputs rather than 3D
+        reset_arrays[:,fixed_words:] = 0
         return reset_arrays
 
     def make_duplicate_matrices(self, generator_data, k):
