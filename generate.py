@@ -396,7 +396,7 @@ class GroundedTranslationGenerator:
             for x in range(k):
                 # Make a deep copy of the word_feats structures 
                 # so the arrays will never be shared
-                dupes[0].append(deepcopy(words[0,:,:]))
+                dupes[0].append(deepcopy(words[0,:])) # modified to 2d from 3d.
                 dupes[1].append(source[0,:])
                 dupes[2].append(img[0,:])
 
