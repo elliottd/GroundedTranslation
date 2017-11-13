@@ -63,7 +63,13 @@ class NIC:
                          mask_zero=True,
                          name="w_embed")(text_input)
 
-        print(wemb._keras_shape)
+        drop_wemb = Dropout(self.dropin, name="wemb_drop")(wemb)
+
+        # Embed -> Hidden
+        emb_to_hidden = TimeDistributed(Dense(output_dim=self.hidden_size,
+                                              input_dim=self.embed_size,
+                                              W_regularizer=l2(self.l2reg)),
+                                              name='wemb_to_hidden')(drop_wemb)
 
         if use_image and use_sourcelang:
             # Concatenated embedding
@@ -117,10 +123,11 @@ class NIC:
         else:
             logger.info("Building an LSTM")
             rnn = InitialisableLSTM(output_dim=self.hidden_size,
+                      input_dim=self.hidden_size,
                       return_sequences=True,
                       W_regularizer=l2(self.l2reg),
                       U_regularizer=l2(self.l2reg),
-                      name='rnn')([wemb, rnn_initialisation])
+                      name='rnn')([emb_to_hidden, rnn_initialisation])
 
         output = TimeDistributed(Dense(output_dim=self.vocab_size,
                                        input_dim=self.hidden_size,
