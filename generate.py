@@ -229,7 +229,7 @@ class GroundedTranslationGenerator:
                     for bidx, b in enumerate(beams):
                         for idx, w in enumerate(b[1]):
                             next_word_index = w
-                            structs['text'][bidx, idx+1, w] = 1.
+                            structs['text'][bidx, idx+1] = w
 
                 # If none of the sentences emitted an <E> token while
                 # decoding, add the final beams into the final candidates
