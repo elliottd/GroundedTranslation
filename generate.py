@@ -229,7 +229,7 @@ class GroundedTranslationGenerator:
                     for bidx, b in enumerate(beams):
                         for idx, w in enumerate(b[1]):
                             next_word_index = w
-                            structs['text'][bidx, idx+1, w] = 1.
+                            structs['text'][bidx, idx+1] = w
 
                 # If none of the sentences emitted an <E> token while
                 # decoding, add the final beams into the final candidates
@@ -374,7 +374,8 @@ class GroundedTranslationGenerator:
         Helper function for generate_sentences().
          """
         reset_arrays = deepcopy(text_arrays)
-        reset_arrays[:,fixed_words:, :] = 1 #
+	# Modified to suit 2D inputs rather than 3D
+        reset_arrays[:,fixed_words:] = 0
         return reset_arrays
 
     def make_duplicate_matrices(self, generator_data, k):
@@ -395,7 +396,7 @@ class GroundedTranslationGenerator:
             for x in range(k):
                 # Make a deep copy of the word_feats structures 
                 # so the arrays will never be shared
-                dupes[0].append(deepcopy(words[0,:,:]))
+                dupes[0].append(deepcopy(words[0,:])) # modified to 2d from 3d.
                 dupes[1].append(source[0,:])
                 dupes[2].append(img[0,:])
 
@@ -415,7 +416,7 @@ class GroundedTranslationGenerator:
             for x in range(k):
                 # Make a deep copy of the word_feats structures 
                 # so the arrays will never be shared
-                dupes[0].append(deepcopy(words[0,:,:]))
+                dupes[0].append(deepcopy(words[0,:]))
                 dupes[1].append(img[0,:])
 
             # Turn the list of arrays into a numpy array

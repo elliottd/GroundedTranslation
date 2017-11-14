@@ -1,5 +1,5 @@
 from keras.models import Model
-from keras.layers import Input, Activation, Dropout, Merge, TimeDistributed, Masking, Dense, Lambda
+from keras.layers import Input, Activation, Dropout, Merge, TimeDistributed, Masking, Dense, Lambda, LSTM
 from keras.layers.embeddings import Embedding
 from keras.regularizers import l2
 from keras.optimizers import Adam
@@ -50,21 +50,26 @@ class NIC:
         '''
         logger.info('Building Keras model...')
 
-        text_input = Input(shape=(self.max_t, self.vocab_size), name='text')
+        text_input = Input(shape=(self.max_t,), name='text')# self.vocab_size), name='text')
         text_mask = Masking(mask_value=0., name='text_mask')(text_input)
 
+        print(text_input._keras_shape)
+
         # Word embeddings
-        wemb = TimeDistributed(Dense(output_dim=self.embed_size,
-                                      input_dim=self.vocab_size,
-                                      W_regularizer=l2(self.l2reg)),
-                                      name="w_embed")(text_mask)
+        wemb = Embedding(output_dim=self.embed_size,
+                         input_dim=self.vocab_size,
+                         input_length=self.max_t,
+                         W_regularizer=l2(self.l2reg),
+                         mask_zero=True,
+                         name="w_embed")(text_input)
+
         drop_wemb = Dropout(self.dropin, name="wemb_drop")(wemb)
 
         # Embed -> Hidden
         emb_to_hidden = TimeDistributed(Dense(output_dim=self.hidden_size,
-                                      input_dim=self.vocab_size,
-                                      W_regularizer=l2(self.l2reg)),
-                                      name='wemb_to_hidden')(drop_wemb)
+                                              input_dim=self.embed_size,
+                                              W_regularizer=l2(self.l2reg)),
+                                              name='wemb_to_hidden')(drop_wemb)
 
         if use_image and use_sourcelang:
             # Concatenated embedding
