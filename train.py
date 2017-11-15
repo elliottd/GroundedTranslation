@@ -178,6 +178,13 @@ if __name__ == "__main__":
                         there are multiple feature vectors. Expects 'sum', \
                         'avg', or 'concat'.")
 
+    # Initialization options
+    parser.add_argument("--init_embeddings", default=None, type=str, help="Path to the\
+		embeddings (in word2vec format) to initialize the word embeddings in the model \
+		(defaults to None, i.e. randomly initialized embeddings).")
+    parser.add_argument("--init_output", action="store_true",
+                        help="Also initialize output embeddings.")
+	
     # Model hyperparameters
     parser.add_argument("--batch_size", default=100, type=int)
     parser.add_argument("--embed_size", default=256, type=int)
