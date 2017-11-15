@@ -56,7 +56,7 @@ class NIC:
         print(text_input._keras_shape)
 
         # Word embeddings
-        if embeddings:
+        if embeddings is not None:
             wemb = Embedding(output_dim=self.embed_size,
                              input_dim=self.vocab_size,
                              input_length=self.max_t,
