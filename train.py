@@ -57,18 +57,23 @@ class GroundedTranslation(object):
         '''
 	embedding_matrix = None
 	if self.args.init_embeddings:
-	    import gensim
+	    import gensim # To load the word embeddings.
+	    # Initialize a matrix with random values.
 	    embedding_matrix = np.random.rand(len(self.data_generator.word2index), self.args.embed_size)
+	    # Load word embeddings using Gensim.
 	    word_embeddings = gensim.models.KeyedVectors.load_word2vec_format(self.args.init_embeddings, 
 									      binary=self.args.binary_embeddings)
+	    logger.info("Loaded embeddings.")
+	    # Loop to fill the matrix with embeddings for each term in the vocabulary.
 	    for word,index in self.data_generator.word2index.items():
 	        if word not in {'<S>','<E>','<P>'}:
 		    try:
-		        embedding_vector = word_embeddings[word]
-		        embedding_matrix[index] = embedding_vector
-		    except KeyError:
+		        embedding_vector = word_embeddings[word]   # Get the word embedding from the loaded model.
+		        embedding_matrix[index] = embedding_vector # Add the word embedding to the matrix.
+		    except KeyError: # If the word is not in the loaded model.
 	                logger.info("No embedding found for %s" % word)
-	    logger.info("Loaded embeddings.")
+	    logger.info("Completed embedding matrix.")
+	    del word_embeddings # Save memory.
 	
         m = models.NIC(self.args)
         model = m.buildKerasModel(use_sourcelang=self.use_sourcelang,
