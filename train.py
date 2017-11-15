@@ -55,10 +55,26 @@ class GroundedTranslation(object):
         losses.history.['loss']
         losses.history.['val_loss']
         '''
-
+	embedding_matrix = None
+	if self.args.init_embeddings:
+	    import gensim
+	    embedding_matrix = np.random.rand(len(self.data_generator.word2index), self.args.embed_size)
+	    word_embeddings = gensim.models.KeyedVectors.load_word2vec_format(self.args.init_embeddings, 
+									      binary=self.args.binary_embeddings)
+	    for word,index in self.data_generator.word2index.items():
+	        if word not in {'<S>','<E>','<P>'}:
+		    try:
+		        embedding_vector = word_embeddings[word]
+		        embedding_matrix[index] = embedding_vector
+		    except KeyError:
+	                logger.info("No embedding found for %s" % word)
+	    logger.info("Loaded embeddings.")
+	
         m = models.NIC(self.args)
         model = m.buildKerasModel(use_sourcelang=self.use_sourcelang,
-                                  use_image=self.use_image)
+                                  use_image=self.use_image,
+				  embeddings=embedding_matrix,
+				  init_output=self.args.init_output)
 
         callbacks = CompilationOfCallbacks(self.data_generator.word2index,
                                            self.data_generator.index2word,
@@ -184,6 +200,7 @@ if __name__ == "__main__":
 		(defaults to None, i.e. randomly initialized embeddings).")
     parser.add_argument("--init_output", action="store_true",
                         help="Also initialize output embeddings.")
+    parser.add_argument("--binary_embeddings", action="store_true", help="Are embeddings in binary format?")
 	
     # Model hyperparameters
     parser.add_argument("--batch_size", default=100, type=int)
