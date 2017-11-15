@@ -19,7 +19,7 @@ logger = logging.getLogger(__name__)
 
 class NIC:
 
-    def __init__(self, options):
+    def __init__(self, options, embeddings=None):
         self.max_t = options.max_t  # Expected timesteps. Needed to build the Theano graph
 
         # Model hyperparameters
@@ -39,6 +39,7 @@ class NIC:
         self.epsilon = 1e-8
         self.clipnorm = options.clipnorm
 
+        self.embeddings = embeddings
         self.weights = options.init_from_checkpoint  # initialise with checkpointed weights?
         self.transfer_img_emb = options.transfer_img_emb
 
