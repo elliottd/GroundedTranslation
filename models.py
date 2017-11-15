@@ -56,12 +56,21 @@ class NIC:
         print(text_input._keras_shape)
 
         # Word embeddings
-        wemb = Embedding(output_dim=self.embed_size,
-                         input_dim=self.vocab_size,
-                         input_length=self.max_t,
-                         W_regularizer=l2(self.l2reg),
-                         mask_zero=True,
-                         name="w_embed")(text_input)
+        if embeddings:
+            wemb = Embedding(output_dim=self.embed_size,
+                             input_dim=self.vocab_size,
+                             input_length=self.max_t,
+                             W_regularizer=l2(self.l2reg),
+                             weights=[embeddings],
+                             mask_zero=True,
+                             name="w_embed")(text_input)
+        else:
+            wemb = Embedding(output_dim=self.embed_size,
+                             input_dim=self.vocab_size,
+                             input_length=self.max_t,
+                             W_regularizer=l2(self.l2reg),
+                             mask_zero=True,
+                             name="w_embed")(text_input)
 
         drop_wemb = Dropout(self.dropin, name="wemb_drop")(wemb)
 
