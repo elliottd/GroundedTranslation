@@ -79,7 +79,8 @@ class GroundedTranslation(object):
         model = m.buildKerasModel(use_sourcelang=self.use_sourcelang,
                                   use_image=self.use_image,
 				  embeddings=embedding_matrix,
-				  init_output=self.args.init_output)
+				  init_output=self.args.init_output,
+				  fix_weights=self.args.fix_weights)
 
         callbacks = CompilationOfCallbacks(self.data_generator.word2index,
                                            self.data_generator.index2word,
