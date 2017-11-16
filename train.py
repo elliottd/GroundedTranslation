@@ -206,6 +206,7 @@ if __name__ == "__main__":
     parser.add_argument("--init_output", action="store_true",
                         help="Also initialize output embeddings.")
     parser.add_argument("--binary_embeddings", action="store_true", help="Are embeddings in binary format?")
+    parser.add_argument("--fix_weights", action="store_true", help="Fix weights for the embeddings?")
 	
     # Model hyperparameters
     parser.add_argument("--batch_size", default=100, type=int)
