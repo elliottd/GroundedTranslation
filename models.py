@@ -42,7 +42,12 @@ class NIC:
         self.weights = options.init_from_checkpoint  # initialise with checkpointed weights?
         self.transfer_img_emb = options.transfer_img_emb
 
-    def buildKerasModel(self, use_sourcelang=False, use_image=True, embeddings=None, init_output=False):
+    def buildKerasModel(self, 
+                        use_sourcelang=False, 
+                        use_image=True, 
+                        embeddings=None, 
+                        init_output=False,
+                        fix_weights=False):
         '''
         Define the exact structure of your model here. We create an image
         description generation model by merging the VGG image features with
@@ -63,6 +68,7 @@ class NIC:
                              W_regularizer=l2(self.l2reg),
                              weights=[embeddings],
                              mask_zero=True,
+                             trainable=not fix_weights,
                              name="w_embed")(text_input)
         else:
             wemb = Embedding(output_dim=self.embed_size,
