@@ -148,12 +148,20 @@ class NIC:
                                               input_dim=self.hidden_size,
                                               W_regularizer=l2(self.l2reg)),
                                         name='rnn_to_output')(rnn)
-        
-        output = TimeDistributed(Dense(output_dim=self.vocab_size,
-                                       input_dim=self.embed_size,
-                                       W_regularizer=l2(self.l2reg),
-                                       activation='softmax'),
-                                 name='output')(rnn_to_output)
+        if init_output:
+            output = TimeDistributed(Dense(output_dim=self.vocab_size,
+                                           input_dim=self.embed_size,
+                                           W_regularizer=l2(self.l2reg),
+                                           activation='softmax',
+                                           weights=[embeddings.T]),
+                                           trainable=not fix_weights,
+                                     name='output')(rnn_to_output)
+        else:
+            output = TimeDistributed(Dense(output_dim=self.vocab_size,
+                                           input_dim=self.embed_size,
+                                           W_regularizer=l2(self.l2reg),
+                                           activation='softmax'),
+                                     name='output')(rnn_to_output)
 
 
         if self.optimiser == 'adam':
