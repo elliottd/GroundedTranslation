@@ -23,6 +23,7 @@ logger = logging.getLogger(__name__)
 BOS = "<S>"  # index 1
 EOS = "<E>"  # index 2
 PAD = "<P>"  # index 0
+UNK = "<U>"  # index 3
 
 # Dimensionality of image feature vector
 IMG_FEATS = 4096
@@ -701,7 +702,7 @@ class VisualWordDataGenerator(object):
 
         return longest_sentence
 
-    def extract_vocabulary(self):
+    def extract_vocabulary(self, unk_token=False):
         '''
         Collect word frequency counts over the train / val inputs and use
         these to create a model vocabulary. Words that appear fewer than
@@ -727,6 +728,8 @@ class VisualWordDataGenerator(object):
         # vocabulary is a word:id dict (superceded by/identical to word2index?)
         # <S>, <E> are special first indices
         vocabulary = {PAD: 0, BOS: 1, EOS: 2}
+	if unk_token:
+	    vocabulary[UNK] = 3
         for v in self.unk_dict:
             if self.unk_dict[v] > self.unk:
                 vocabulary[v] = len(vocabulary)
