@@ -122,7 +122,7 @@ class GroundedTranslation(object):
             if self.args.existing_vocab != "":
                 self.data_generator.set_vocabulary(self.args.existing_vocab)
             else:
-                self.data_generator.extract_vocabulary()
+                self.data_generator.extract_vocabulary(unk_token=self.args.unk_token)
         self.args.vocab_size = self.data_generator.get_vocab_size()
 
         if not self.use_sourcelang:
@@ -208,7 +208,8 @@ if __name__ == "__main__":
                         help="Also initialize output embeddings.")
     parser.add_argument("--binary_embeddings", action="store_true", help="Are embeddings in binary format?")
     parser.add_argument("--fix_weights", action="store_true", help="Fix weights for the embeddings?")
-	
+    parser.add_argument("--unk_token", action="store_true", help="Use an unk token? If not specified the model skips them.")
+
     # Model hyperparameters
     parser.add_argument("--batch_size", default=100, type=int)
     parser.add_argument("--embed_size", default=256, type=int)
