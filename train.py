@@ -55,10 +55,32 @@ class GroundedTranslation(object):
         losses.history.['loss']
         losses.history.['val_loss']
         '''
-
+	embedding_matrix = None
+	if self.args.init_embeddings:
+	    import gensim # To load the word embeddings.
+	    # Initialize a matrix with random values.
+	    embedding_matrix = np.random.rand(len(self.data_generator.word2index), self.args.embed_size)
+	    # Load word embeddings using Gensim.
+	    word_embeddings = gensim.models.KeyedVectors.load_word2vec_format(self.args.init_embeddings, 
+									      binary=self.args.binary_embeddings)
+	    logger.info("Loaded embeddings.")
+	    # Loop to fill the matrix with embeddings for each term in the vocabulary.
+	    for word,index in self.data_generator.word2index.items():
+	        if word not in {'<S>','<E>','<P>'}:
+		    try:
+		        embedding_vector = word_embeddings[word]   # Get the word embedding from the loaded model.
+		        embedding_matrix[index] = embedding_vector # Add the word embedding to the matrix.
+		    except KeyError: # If the word is not in the loaded model.
+	                logger.info("No embedding found for %s" % word)
+	    logger.info("Completed embedding matrix.")
+	    del word_embeddings # Save memory.
+	
         m = models.NIC(self.args)
         model = m.buildKerasModel(use_sourcelang=self.use_sourcelang,
-                                  use_image=self.use_image)
+                                  use_image=self.use_image,
+				  embeddings=embedding_matrix,
+				  init_output=self.args.init_output,
+				  fix_weights=self.args.fix_weights)
 
         callbacks = CompilationOfCallbacks(self.data_generator.word2index,
                                            self.data_generator.index2word,
@@ -100,7 +122,7 @@ class GroundedTranslation(object):
             if self.args.existing_vocab != "":
                 self.data_generator.set_vocabulary(self.args.existing_vocab)
             else:
-                self.data_generator.extract_vocabulary()
+                self.data_generator.extract_vocabulary(unk_token=self.args.unk_token)
         self.args.vocab_size = self.data_generator.get_vocab_size()
 
         if not self.use_sourcelang:
@@ -177,6 +199,16 @@ if __name__ == "__main__":
                         help="How to merge source features. Only applies if \
                         there are multiple feature vectors. Expects 'sum', \
                         'avg', or 'concat'.")
+
+    # Initialization options
+    parser.add_argument("--init_embeddings", default=None, type=str, help="Path to the\
+		embeddings (in word2vec format) to initialize the word embeddings in the model \
+		(defaults to None, i.e. randomly initialized embeddings).")
+    parser.add_argument("--init_output", action="store_true",
+                        help="Also initialize output embeddings.")
+    parser.add_argument("--binary_embeddings", action="store_true", help="Are embeddings in binary format?")
+    parser.add_argument("--fix_weights", action="store_true", help="Fix weights for the embeddings?")
+    parser.add_argument("--unk_token", action="store_true", help="Use an unk token? If not specified the model skips them.")
 
     # Model hyperparameters
     parser.add_argument("--batch_size", default=100, type=int)

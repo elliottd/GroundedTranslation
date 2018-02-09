@@ -42,7 +42,12 @@ class NIC:
         self.weights = options.init_from_checkpoint  # initialise with checkpointed weights?
         self.transfer_img_emb = options.transfer_img_emb
 
-    def buildKerasModel(self, use_sourcelang=False, use_image=True):
+    def buildKerasModel(self, 
+                        use_sourcelang=False, 
+                        use_image=True, 
+                        embeddings=None, 
+                        init_output=False,
+                        fix_weights=False):
         '''
         Define the exact structure of your model here. We create an image
         description generation model by merging the VGG image features with
@@ -56,12 +61,22 @@ class NIC:
         print(text_input._keras_shape)
 
         # Word embeddings
-        wemb = Embedding(output_dim=self.embed_size,
-                         input_dim=self.vocab_size,
-                         input_length=self.max_t,
-                         W_regularizer=l2(self.l2reg),
-                         mask_zero=True,
-                         name="w_embed")(text_input)
+        if embeddings is not None:
+            wemb = Embedding(output_dim=self.embed_size,
+                             input_dim=self.vocab_size,
+                             input_length=self.max_t,
+                             W_regularizer=l2(self.l2reg),
+                             weights=[embeddings],
+                             mask_zero=True,
+                             trainable=not fix_weights,
+                             name="w_embed")(text_input)
+        else:
+            wemb = Embedding(output_dim=self.embed_size,
+                             input_dim=self.vocab_size,
+                             input_length=self.max_t,
+                             W_regularizer=l2(self.l2reg),
+                             mask_zero=True,
+                             name="w_embed")(text_input)
 
         drop_wemb = Dropout(self.dropin, name="wemb_drop")(wemb)
 
@@ -129,11 +144,25 @@ class NIC:
                       U_regularizer=l2(self.l2reg),
                       name='rnn')([emb_to_hidden, rnn_initialisation])
 
-        output = TimeDistributed(Dense(output_dim=self.vocab_size,
-                                       input_dim=self.hidden_size,
-                                       W_regularizer=l2(self.l2reg),
-                                       activation='softmax'),
-                                       name='output')(rnn)
+        rnn_to_output = TimeDistributed(Dense(output_dim=self.embed_size,
+                                              input_dim=self.hidden_size,
+                                              W_regularizer=l2(self.l2reg)),
+                                        name='rnn_to_output')(rnn)
+        if init_output:
+            output = TimeDistributed(Dense(output_dim=self.vocab_size,
+                                           input_dim=self.embed_size,
+                                           W_regularizer=l2(self.l2reg),
+                                           activation='softmax',
+                                           weights=[embeddings.T]),
+                                           trainable=not fix_weights,
+                                     name='output')(rnn_to_output)
+        else:
+            output = TimeDistributed(Dense(output_dim=self.vocab_size,
+                                           input_dim=self.embed_size,
+                                           W_regularizer=l2(self.l2reg),
+                                           activation='softmax'),
+                                     name='output')(rnn_to_output)
+
 
         if self.optimiser == 'adam':
             # allow user-defined hyper-parameters for ADAM because it is
